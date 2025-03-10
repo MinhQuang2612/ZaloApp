@@ -76,9 +76,9 @@ export default function RegisterOTP() {
       </View>
 
       <Text style={styles.callingText}>
-        Đang gọi đến số {phone ? `(+84) ${phone}` : "(+84) XXX XXX XXX"}
+        Tin nhắn được gửi đến số {phone ? `(+84) ${phone}` : "(+84) XXX XXX XXX"}
       </Text>
-      <Text style={styles.callingSubText}>Vui lòng bắt máy để nghe mã</Text>
+      <Text style={styles.callingSubText}>Vui lòng nhập mã vào ô bên dưới</Text>
 
       {/* OTP Input */}
       <View style={styles.otpContainer}>
