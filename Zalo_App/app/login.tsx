@@ -1,15 +1,35 @@
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from "react-native";
 import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons"; // Import icon
+import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
+import { loginUser } from "../services/auth";
 
 export default function Login() {
   const router = useRouter();
-  const [phoneNumber, setPhoneNumber] = useState("0838849375");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [isPhoneFocused, setIsPhoneFocused] = useState(false);
-  const [isPasswordFocused, setIsPasswordFocused] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState<string>("");
+  const [password, setPassword] = useState<string>("");
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [isPhoneFocused, setIsPhoneFocused] = useState<boolean>(false);
+  const [isPasswordFocused, setIsPasswordFocused] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(false);
+
+  const handleLogin = async () => {
+    if (!phoneNumber || !password) {
+      Alert.alert("Lỗi", "Vui lòng nhập số điện thoại và mật khẩu!");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const user = await loginUser(phoneNumber, password);
+      Alert.alert("Thành công", `Chào mừng ${user.username || "Người dùng"}!`);
+      router.replace("/home");
+    } catch (error: any) {
+      Alert.alert("Lỗi", error || "Đăng nhập thất bại. Vui lòng thử lại!");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -60,11 +80,8 @@ export default function Login() {
         <Text style={styles.forgotText}>Lấy lại mật khẩu</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.button}
-        onPress={() => alert("Đăng nhập thành công! (Chưa có logic thực tế)")}
-      >
-        <Text style={styles.buttonText}>Đăng nhập</Text>
+      <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
+        <Text style={styles.buttonText}>{loading ? "Đang đăng nhập..." : "Đăng nhập"}</Text>
       </TouchableOpacity>
 
       <Text style={styles.registerText}>
@@ -82,7 +99,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#fff",
     paddingHorizontal: 15,
-    paddingTop: 0, 
+    paddingTop: 0,
   },
   header: {
     flexDirection: "row",
@@ -98,11 +115,11 @@ const styles = StyleSheet.create({
     color: "#007AFF",
   },
   infoBox: {
-    backgroundColor: "#F5F5F5", // Màu xám nhạt
+    backgroundColor: "#F5F5F5",
     paddingVertical: 10,
     paddingHorizontal: 25,
     marginBottom: 15,
-    marginHorizontal: -20, 
+    marginHorizontal: -20,
   },
   instruction: {
     fontSize: 14,
@@ -117,7 +134,7 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   inputFocused: {
-    borderBottomColor: "#007AFF", 
+    borderBottomColor: "#007AFF",
     borderBottomWidth: 2,
   },
   input: {
