@@ -19,7 +19,7 @@ interface LoginResponse {
 // Hàm đăng nhập
 export const loginUser = async (phoneNumber: string, password: string): Promise<User> => {
   try {
-    const response = await api.post("/user/login", { phoneNumber, password });
+    const response = await api.post("/api/user/login", { phoneNumber, password });
 
     console.log("Dữ liệu API trả về:", response.data);
 
@@ -47,7 +47,7 @@ export const loginUser = async (phoneNumber: string, password: string): Promise<
 // Lấy user từ AsyncStorage
 export const getCurrentUser = async (): Promise<User | null> => {
   try {
-    const userData = await AsyncStorage.getItem("user");
+    const userData = await AsyncStorage.getItem("/api/user");
     if (!userData) {
       console.log("Không tìm thấy user trong AsyncStorage");
       return null;
