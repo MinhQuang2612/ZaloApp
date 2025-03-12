@@ -31,10 +31,12 @@ export const loginUser = async (phoneNumber: string, password: string): Promise<
 
     // Lưu thông tin user vào AsyncStorage
     await AsyncStorage.setItem("user", JSON.stringify(user));
+    console.log("Đã lưu user vào AsyncStorage:", user); // Thêm log để kiểm tra
 
     // Nếu API trả về token, lưu token
     if (response.data.token) {
       await AsyncStorage.setItem("userToken", response.data.token);
+      console.log("Đã lưu token vào AsyncStorage:", response.data.token);
     }
 
     return user;
@@ -47,7 +49,7 @@ export const loginUser = async (phoneNumber: string, password: string): Promise<
 // Lấy user từ AsyncStorage
 export const getCurrentUser = async (): Promise<User | null> => {
   try {
-    const userData = await AsyncStorage.getItem("/api/user");
+    const userData = await AsyncStorage.getItem("user"); 
     if (!userData) {
       console.log("Không tìm thấy user trong AsyncStorage");
       return null;
