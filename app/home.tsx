@@ -4,6 +4,8 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
 import { getCurrentUser, logoutUser } from "../services/auth";
+import Footer from "../components/Footer";
+
 
 interface User {
   _id: string;
@@ -55,28 +57,37 @@ export default function Home() {
           <Ionicons name="log-out" size={24} color="#007AFF" />
         </TouchableOpacity>
       </View>
-
-      <View style={styles.userInfo}>
-        <Ionicons name="person-circle" size={80} color="#007AFF" />
-        <Text style={styles.userName}>{user?.username || "Không có tên"}</Text>
-        <Text style={styles.userPhone}>{user?.phoneNumber || "Không có số điện thoại"}</Text>
+  
+      <View style={styles.content}> 
+        <View style={styles.userInfo}>
+          <Ionicons name="person-circle" size={80} color="#007AFF" />
+          <Text style={styles.userName}>{user?.username || "Không có tên"}</Text>
+          <Text style={styles.userPhone}>{user?.phoneNumber || "Không có số điện thoại"}</Text>
+        </View>
+  
+        <Text style={styles.welcome}>Chào mừng bạn đến với Zalo Chat! 🎉</Text>
+  
+        <TouchableOpacity style={styles.logoutButtonLarge} onPress={handleLogout}>
+          <Text style={styles.logoutText}>Đăng xuất</Text>
+        </TouchableOpacity>
       </View>
-
-      <Text style={styles.welcome}>Chào mừng bạn đến với Zalo Chat! 🎉</Text>
-
-      <TouchableOpacity style={styles.logoutButtonLarge} onPress={handleLogout}>
-        <Text style={styles.logoutText}>Đăng xuất</Text>
-      </TouchableOpacity>
+  
+      <Footer /> {/* Footer luôn nằm dưới */}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flex: 1, // Cho toàn bộ màn hình chiếm hết không gian
     backgroundColor: "#fff",
     paddingHorizontal: 15,
     paddingTop: 50,
+  },
+  content: {
+    flex: 1, // Đảm bảo phần nội dung chính đẩy footer xuống cuối
+    justifyContent: "center",
+    alignItems: "center",
   },
   header: {
     flexDirection: "row",

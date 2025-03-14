@@ -10,6 +10,9 @@ export default function RootLayout() {
       <Stack.Screen name="register_otp" options={{ headerShown: false }} />
       <Stack.Screen name="create_account" options={{ headerShown: false }} />
       <Stack.Screen name="home" options={{ headerShown: false }} />
+      <Stack.Screen name="profile" options={{ headerShown: false }} />
+      <Stack.Screen name="profile_details" options={{ headerShown: false }} />
+      <Stack.Screen name="change_password" options={{ headerShown: false }} />
     </Stack>
   );
 }
