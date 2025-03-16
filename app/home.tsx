@@ -1,44 +1,88 @@
-// chỉ mới code để hiển thị thông tin người dùng và nút đăng xuất.
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from "react-native";
-import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
-import { getCurrentUser, logoutUser } from "../services/auth";
+import { View, FlatList, StyleSheet, Image, TouchableOpacity, Text, ActivityIndicator, RefreshControl } from "react-native";
+import { useRouter } from "expo-router";
+import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
-
-
-interface User {
-  _id: string;
-  userID: string;
-  phoneNumber: string;
-  username: string;
-  accountRole: string;
-  DOB: string;
-  __v: number;
-}
+import { fetchMessages, Message } from "../services/message";
+import { fetchContacts, Contact } from "../services/contacts";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function Home() {
+  const [messages, setMessages] = useState<{ senderID: string; context: string; createdAt: string }[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [currentUserID, setCurrentUserID] = useState<string | null>(null);
+
+  const loadMessages = async () => {
+    try {
+      const userData = await AsyncStorage.getItem("user");
+      if (!userData) {
+        console.error("Không tìm thấy user trong AsyncStorage");
+        throw new Error("Không tìm thấy user");
+      }
+
+      const user = JSON.parse(userData);
+      const userID = user.userID;
+      setCurrentUserID(userID);
+      console.log("Current User ID:", userID);
+
+      const contactsData = await fetchContacts();
+      setContacts(contactsData);
+
+      if (!contactsData || contactsData.length === 0) {
+        console.warn("Không có danh sách contacts");
+        setMessages([]);
+        return;
+      }
+
+      const allMessages: { senderID: string; context: string; createdAt: string }[] = [];
+      for (const contact of contactsData) {
+        const contactMessages = await fetchMessages(contact.userID);
+        console.log(`Messages for ${contact.userID}:`, contactMessages);
+
+        const relevantMessages = contactMessages.filter(
+          (msg) => msg.senderID === userID || msg.receiverID === userID
+        );
+
+        const latestMessage = relevantMessages.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        )[0];
+
+        if (latestMessage) {
+          allMessages.push({
+            senderID: latestMessage.senderID === userID ? latestMessage.receiverID : latestMessage.senderID,
+            context: latestMessage.context,
+            createdAt: latestMessage.createdAt,
+          });
+        }
+      }
+
+      allMessages.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      console.log("Final Messages:", allMessages);
+      setMessages(allMessages);
+    } catch (error) {
+      console.error("Lỗi khi tải tin nhắn:", error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchUser = async () => {
-      const userData = await getCurrentUser();
-      if (!userData) {
-        router.replace("/login");
-      } else {
-        setUser(userData);
-      }
-      setLoading(false);
-    };
-
-    fetchUser();
+    loadMessages();
   }, []);
 
-  const handleLogout = async () => {
-    await logoutUser();
-    router.replace("/login");
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadMessages();
+  };
+
+  const getUserName = (userID: string) => {
+    if (!contacts.length) return "Đang tải...";
+    const user = contacts.find((contact) => contact.userID === userID);
+    return user ? user.username : "Không xác định";
   };
 
   if (loading) {
@@ -49,98 +93,51 @@ export default function Home() {
     );
   }
 
+  const renderItem = ({ item }: { item: { senderID: string; context: string; createdAt: string } }) => (
+    <TouchableOpacity
+      style={styles.item}
+      onPress={() => router.push({ pathname: "/chat", params: { userID: item.senderID } })}
+    >
+      <Image source={{ uri: "https://randomuser.me/api/portraits/men/1.jpg" }} style={styles.avatar} />
+      <View style={styles.messageContent}>
+        <Text style={styles.name}>{getUserName(item.senderID)}</Text> {/* ✅ Hiển thị đúng tên */}
+        <Text style={styles.message}>{item.context}</Text>
+      </View>
+      <Text style={styles.time}>{new Date(item.createdAt).toLocaleTimeString()}</Text>
+    </TouchableOpacity>
+  );
+
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Trang Chủ</Text>
-        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-          <Ionicons name="log-out" size={24} color="#007AFF" />
-        </TouchableOpacity>
-      </View>
-  
-      <View style={styles.content}> 
-        <View style={styles.userInfo}>
-          <Ionicons name="person-circle" size={80} color="#007AFF" />
-          <Text style={styles.userName}>{user?.username || "Không có tên"}</Text>
-          <Text style={styles.userPhone}>{user?.phoneNumber || "Không có số điện thoại"}</Text>
+      <Navbar showSearch showQR showAdd addIconType="add" />
+
+      {messages.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>Không có tin nhắn nào để hiển thị.</Text>
         </View>
-  
-        <Text style={styles.welcome}>Chào mừng bạn đến với Zalo Chat! 🎉</Text>
-  
-        <TouchableOpacity style={styles.logoutButtonLarge} onPress={handleLogout}>
-          <Text style={styles.logoutText}>Đăng xuất</Text>
-        </TouchableOpacity>
-      </View>
-  
-      <Footer /> {/* Footer luôn nằm dưới */}
+      ) : (
+        <FlatList
+          data={messages}
+          keyExtractor={(item, index) => index.toString()}
+          renderItem={renderItem}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        />
+      )}
+
+      <Footer />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1, // Cho toàn bộ màn hình chiếm hết không gian
-    backgroundColor: "#fff",
-    paddingHorizontal: 15,
-    paddingTop: 50,
-  },
-  content: {
-    flex: 1, // Đảm bảo phần nội dung chính đẩy footer xuống cuối
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingBottom: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: "#ccc",
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#007AFF",
-  },
-  logoutButton: {
-    padding: 5,
-  },
-  userInfo: {
-    alignItems: "center",
-    marginTop: 30,
-  },
-  userName: {
-    fontSize: 22,
-    fontWeight: "bold",
-    marginTop: 10,
-  },
-  userPhone: {
-    fontSize: 16,
-    color: "#555",
-  },
-  welcome: {
-    fontSize: 18,
-    color: "#333",
-    textAlign: "center",
-    marginTop: 20,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  logoutButtonLarge: {
-    backgroundColor: "#FF3B30",
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
-    marginTop: 30,
-    width: "75%",
-    alignSelf: "center",
-  },
-  logoutText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
+  container: { flex: 1, backgroundColor: "#fff" },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  emptyContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  emptyText: { fontSize: 16, color: "#666" },
+  item: { flexDirection: "row", alignItems: "center", padding: 15, borderBottomWidth: 1, borderBottomColor: "#ddd" },
+  avatar: { width: 50, height: 50, borderRadius: 25 },
+  messageContent: { flex: 1, marginLeft: 10 },
+  name: { fontSize: 16, fontWeight: "bold" },
+  message: { fontSize: 14, color: "#666" },
+  time: { fontSize: 12, color: "#999" },
 });

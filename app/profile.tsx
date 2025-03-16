@@ -1,8 +1,18 @@
-import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Switch } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
+  Switch,
+} from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
 import { getCurrentUser } from "../services/auth";
+import Footer from "../components/Footer";
+import { logoutUser } from "../services/auth";
 
 interface User {
   _id: string;
@@ -45,7 +55,10 @@ export default function Profile() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+        >
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
         <Text style={styles.title}>Tài khoản và bảo mật</Text>
@@ -53,7 +66,10 @@ export default function Profile() {
 
       {/* Thông tin tài khoản */}
       <Text style={styles.sectionTitle}>Tài khoản</Text>
-      <TouchableOpacity style={styles.card} onPress={() => router.push("/profile_details")}>
+      <TouchableOpacity
+        style={styles.card}
+        onPress={() => router.push("/profile_details")}
+      >
         <View style={styles.row}>
           <Image
             source={require("../assets/images/dog_avatar.gif")}
@@ -61,7 +77,9 @@ export default function Profile() {
           />
           <View style={styles.userInfo}>
             <Text style={styles.subText}>Thông tin cá nhân</Text>
-            <Text style={styles.userName}>{user?.username || "Không có tên"}</Text>
+            <Text style={styles.userName}>
+              {user?.username || "Không có tên"}
+            </Text>
           </View>
           <Ionicons name="chevron-forward" size={22} color="#999" />
         </View>
@@ -99,7 +117,10 @@ export default function Profile() {
         <Switch value={twoFactorAuth} onValueChange={setTwoFactorAuth} />
       </View>
 
-      <TouchableOpacity style={styles.item} onPress={() => router.push("/change_password")}>
+      <TouchableOpacity
+        style={styles.item}
+        onPress={() => router.push("/change_password")}
+      >
         <Ionicons name="key" size={22} color="#007AFF" />
         <Text style={styles.itemText}>Đổi mật khẩu</Text>
         <Ionicons name="chevron-forward" size={22} color="#999" />
@@ -110,13 +131,30 @@ export default function Profile() {
         <Ionicons name="trash" size={22} color="red" />
         <Text style={[styles.itemText, { color: "red" }]}>Xóa tài khoản</Text>
       </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.item, { borderBottomWidth: 0 }]}
+        onPress={async () => {
+          await logoutUser(); // Xóa thông tin đăng nhập
+          router.replace("/login"); 
+        }}
+      >
+        <Ionicons name="log-out-outline" size={22} color="red" />
+        <Text style={[styles.itemText, { color: "red" }]}>Đăng xuất</Text>
+      </TouchableOpacity>
+
+      {/* Spacer để đẩy Footer xuống dưới */}
+      <View style={styles.spacer} />
+
+      {/* Footer */}
+      <Footer />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flex: 1, // Container chính chiếm toàn bộ chiều cao màn hình
     backgroundColor: "#fff",
     paddingHorizontal: 15,
   },
@@ -188,6 +226,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  spacer: {
+    flex: 1,
+  },
 });
-
-

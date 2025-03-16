@@ -2,7 +2,7 @@ import { useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { changePassword } from "../services/password"; // Import API
+import { changePassword, validateNewPassword } from "../services/password"; 
 
 export default function ChangePassword() {
   const router = useRouter();
@@ -11,34 +11,57 @@ export default function ChangePassword() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [newPasswordError, setNewPasswordError] = useState<string | null>(null);
+  const [confirmPasswordError, setConfirmPasswordError] = useState<string | null>(null);
+
+  // Kiểm tra khi người dùng nhập mật khẩu mới
+  const handleNewPasswordChange = (text: string) => {
+    setNewPassword(text);
+    const error = validateNewPassword(text);
+    setNewPasswordError(error);
+  };
+
+  // Kiểm tra khi người dùng nhập lại mật khẩu
+  const handleConfirmPasswordChange = (text: string) => {
+    setConfirmPassword(text);
+    if (text && text !== newPassword) {
+      setConfirmPasswordError("Mật khẩu nhập lại không khớp.");
+    } else {
+      setConfirmPasswordError(null);
+    }
+  };
+
+  // Kiểm tra điều kiện để bật nút "CẬP NHẬT"
+  const isButtonEnabled = () => {
+    return (
+      currentPassword.length > 0 &&
+      newPassword.length > 0 &&
+      confirmPassword.length > 0 &&
+      !newPasswordError &&
+      !confirmPasswordError
+    );
+  };
 
   // Hàm xử lý đổi mật khẩu
   const handleUpdatePassword = async () => {
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      Alert.alert("Lỗi", "Vui lòng điền đầy đủ thông tin.");
+    if (!isButtonEnabled()) {
+      Alert.alert("Lỗi", "Vui lòng kiểm tra lại thông tin nhập.");
       return;
     }
-    if (newPassword.length < 6) {
-      Alert.alert("Lỗi", "Mật khẩu mới phải có ít nhất 6 ký tự.");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      Alert.alert("Lỗi", "Mật khẩu mới không khớp.");
-      return;
-    }
-
+  
     setLoading(true);
-
+  
     try {
-      await changePassword(currentPassword, newPassword);
+      await changePassword(currentPassword, newPassword, confirmPassword);
       Alert.alert("Thành công", "Mật khẩu đã được cập nhật.");
       router.back();
     } catch (error: any) {
-      Alert.alert("Lỗi", error);
+      Alert.alert("Lỗi", error.message || "Có lỗi xảy ra.");
     }
-
+  
     setLoading(false);
   };
+  
 
   return (
     <View style={styles.container}>
@@ -77,12 +100,13 @@ export default function ChangePassword() {
             secureTextEntry={!showPassword}
             placeholder="Nhập mật khẩu mới"
             value={newPassword}
-            onChangeText={setNewPassword}
+            onChangeText={handleNewPasswordChange}
           />
           <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
             <Text style={styles.showText}>{showPassword ? "ẨN" : "HIỆN"}</Text>
           </TouchableOpacity>
         </View>
+        {newPasswordError && <Text style={styles.errorText}>{newPasswordError}</Text>}
 
         <Text style={styles.label}>Nhập lại mật khẩu mới:</Text>
         <View style={styles.inputWrapper}>
@@ -91,20 +115,21 @@ export default function ChangePassword() {
             secureTextEntry={!showPassword}
             placeholder="Nhập lại mật khẩu mới"
             value={confirmPassword}
-            onChangeText={setConfirmPassword}
+            onChangeText={handleConfirmPasswordChange}
           />
           <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
             <Text style={styles.showText}>{showPassword ? "ẨN" : "HIỆN"}</Text>
           </TouchableOpacity>
         </View>
+        {confirmPasswordError && <Text style={styles.errorText}>{confirmPasswordError}</Text>}
       </View>
 
       <TouchableOpacity
-        style={[styles.updateButton, (!currentPassword || !newPassword || !confirmPassword) && styles.disabledButton]}
+        style={[styles.updateButton, !isButtonEnabled() && styles.disabledButton]}
         onPress={handleUpdatePassword}
-        disabled={!currentPassword || !newPassword || !confirmPassword}
+        disabled={!isButtonEnabled() || loading}
       >
-        <Text style={styles.updateText}>CẬP NHẬT</Text>
+        <Text style={styles.updateText}>{loading ? "ĐANG CẬP NHẬT..." : "CẬP NHẬT"}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -167,6 +192,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "bold",
   },
+  errorText: {
+    color: "red",
+    fontSize: 12,
+    marginTop: 5,
+  },
   updateButton: {
     backgroundColor: "#007AFF",
     paddingVertical: 12,
@@ -183,4 +213,3 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
 });
-
