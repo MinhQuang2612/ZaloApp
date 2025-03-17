@@ -97,7 +97,7 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: "#007AFF",
     paddingHorizontal: 10,
-    paddingVertical: 3,
+    paddingVertical: 4,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -108,8 +108,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#007AFF",
     borderRadius: 20,
     flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    //paddingVertical: 8,
+    paddingHorizontal: 10,
   },
   searchInput: {
     color: "#fff",
