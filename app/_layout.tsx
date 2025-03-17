@@ -15,6 +15,8 @@ export default function RootLayout() {
       <Stack.Screen name="change_password" options={{ headerShown: false }} />
       <Stack.Screen name="chat" options={{ headerShown: false }} />
       <Stack.Screen name="contacts" options={{ headerShown: false }} />
+      <Stack.Screen name="explore" options={{headerShown: false}}/>
+      <Stack.Screen name="journal" options={{headerShown: false}}/>
     </Stack>
   );
 }

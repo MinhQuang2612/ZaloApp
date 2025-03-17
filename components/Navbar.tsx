@@ -1,15 +1,16 @@
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Pressable, Dimensions } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Pressable, Dimensions, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useState, useRef, RefObject } from "react";
 import React from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context"; // Hook đa nền tảng
 
 interface NavbarProps {
   title?: string;
   showSearch?: boolean;
   showQR?: boolean;
   showAdd?: boolean;
-  addIconType?: "add" | "person-add-outline"; 
+  addIconType?: "add" | "person-add-outline";
 }
 
 const Navbar: React.FC<NavbarProps> = ({ title, showSearch, showQR, showAdd, addIconType = "add" }) => {
@@ -18,6 +19,7 @@ const Navbar: React.FC<NavbarProps> = ({ title, showSearch, showQR, showAdd, add
   const [dropdownPosition, setDropdownPosition] = useState({ top: 50, right: 15 });
   const addButtonRef: RefObject<React.ElementRef<typeof TouchableOpacity>> = useRef(null);
   const screenWidth = Dimensions.get("window").width;
+  const insets = useSafeAreaInsets(); // Lấy giá trị vùng an toàn (trên Android, insets.top thường là 0)
 
   // Hàm mở dropdown
   const openDropdown = () => {
@@ -32,16 +34,22 @@ const Navbar: React.FC<NavbarProps> = ({ title, showSearch, showQR, showAdd, add
   };
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        {
+          // Trên iOS: paddingTop = insets.top để nằm sát dưới Dynamic Island
+          // Trên Android: paddingTop = 3 (giá trị mặc định, không bị ảnh hưởng bởi insets)
+          paddingTop: Platform.OS === "ios" ? insets.top : 3,
+          paddingBottom: 8, // Đảm bảo chiều cao navbar đủ lớn
+        },
+      ]}
+    >
       {/* Thanh tìm kiếm */}
       {showSearch ? (
         <View style={styles.searchContainer}>
           <Ionicons name="search" size={25} color="#fff" />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Tìm kiếm"
-            placeholderTextColor="#ccc"
-          />
+          <TextInput style={styles.searchInput} placeholder="Tìm kiếm" placeholderTextColor="#ccc" />
         </View>
       ) : (
         <Text style={styles.title}>{title}</Text>
@@ -97,7 +105,6 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: "#007AFF",
     paddingHorizontal: 10,
-    paddingVertical: 3,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -105,7 +112,7 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#007AFF",
+    backgroundColor: "#005BB5",
     borderRadius: 20,
     flex: 1,
     paddingVertical: 8,
@@ -113,7 +120,7 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     color: "#fff",
-    fontSize: 20,
+    fontSize: 18,
     marginLeft: 10,
     flex: 1,
   },
