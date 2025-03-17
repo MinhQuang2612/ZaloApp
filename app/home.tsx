@@ -82,8 +82,9 @@ export default function Home() {
   const getUserName = (userID: string) => {
     if (!contacts.length) return "Đang tải...";
     const user = contacts.find((contact) => contact.userID === userID);
-    return user ? user.username : "Không xác định";
+    return user?.username || "Không xác định";
   };
+  
 
   if (loading) {
     return (
@@ -100,8 +101,8 @@ export default function Home() {
     >
       <Image source={{ uri: "https://randomuser.me/api/portraits/men/1.jpg" }} style={styles.avatar} />
       <View style={styles.messageContent}>
-        <Text style={styles.name}>{getUserName(item.senderID)}</Text> {/* ✅ Hiển thị đúng tên */}
-        <Text style={styles.message}>{item.context}</Text>
+        <Text style={styles.name}>{getUserName(item.senderID).toString()}</Text> {/* ✅ Hiển thị đúng tên */}
+        <Text style={styles.message}>{item.context ? item.context.toString() : "Không có nội dung"}</Text>
       </View>
       <Text style={styles.time}>{new Date(item.createdAt).toLocaleTimeString()}</Text>
     </TouchableOpacity>

@@ -1,8 +1,9 @@
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import { loginUser } from "../services/auth";
+import { useSafeAreaInsets } from "react-native-safe-area-context"; // Hook đa nền tảng
 
 export default function Login() {
   const router = useRouter();
@@ -12,6 +13,7 @@ export default function Login() {
   const [isPhoneFocused, setIsPhoneFocused] = useState<boolean>(false);
   const [isPasswordFocused, setIsPasswordFocused] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
+  const insets = useSafeAreaInsets(); // Lấy giá trị vùng an toàn (trên Android, insets.top thường là
 
   const handleLogin = async () => {
     if (!phoneNumber || !password) {
@@ -32,7 +34,15 @@ export default function Login() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[
+            styles.container,
+            {
+              // Trên iOS: paddingTop = insets.top để nằm sát dưới Dynamic Island
+              // Trên Android: paddingTop = 3 (giá trị mặc định, không bị ảnh hưởng bởi insets)
+              paddingTop: Platform.OS === "ios" ? insets.top : 3,
+              paddingBottom: 8, // Đảm bảo chiều cao navbar đủ lớn
+            },
+          ]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#007AFF" />

@@ -1,12 +1,15 @@
-import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from "react-native";
+import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions, Platform } from "react-native";
 import Swiper from "react-native-swiper";
 import { useRouter } from "expo-router";
 import { useState } from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context"; // Hook đa nền tảng
+
 
 export default function Welcome() {
   const router = useRouter();
   const [language, setLanguage] = useState("Tiếng Việt");
   const [showDropdown, setShowDropdown] = useState(false);
+  const insets = useSafeAreaInsets(); // Lấy giá trị vùng an toàn (trên Android, insets.top thường là 0)
 
   const changeLanguage = (lang: string) => {
     setLanguage(lang);
@@ -14,8 +17,21 @@ export default function Welcome() {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.languageContainer}>
+    <View style={[
+            styles.container,
+            {
+              // Trên iOS: paddingTop = insets.top để nằm sát dưới Dynamic Island
+              // Trên Android: paddingTop = 3 (giá trị mặc định, không bị ảnh hưởng bởi insets)
+              paddingTop: Platform.OS === "ios" ? insets.top : 3,
+              paddingBottom: 8, // Đảm bảo chiều cao navbar đủ lớn
+            },
+          ]}>
+      <View style={[
+      styles.languageContainer,
+      {
+        top: Platform.OS === "ios" ? insets.top + 5 : 20, // Đẩy xuống dưới Dynamic Island
+      },
+    ]}>
         <TouchableOpacity style={styles.languageButton} onPress={() => setShowDropdown(!showDropdown)}>
           <Text style={styles.languageText}>{language} ⌵</Text>
         </TouchableOpacity>
@@ -34,8 +50,9 @@ export default function Welcome() {
 
       <Image source={require("../assets/images/logo.png")} style={styles.logo} />
 
-      <Swiper style={styles.wrapper} showsButtons={false} dotStyle={styles.dot} activeDotStyle={styles.activeDot}>
-        <View style={styles.slide}>
+      <Swiper style={styles.wrapper} showsButtons={false} dotStyle={styles.dot} activeDotStyle={styles.activeDot} autoplay={true} 
+  autoplayTimeout={2} >
+        <View style={styles.slide}>   
           <Image source={require("../assets/images/nhat_ky_ban_be.png")} style={styles.illustration} />
           <Text style={styles.title}>Nhật ký bạn bè</Text>
           <Text style={styles.subtitle}>Nơi cập nhật hoạt động mới nhất của những người bạn quan tâm</Text>
@@ -90,6 +107,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     paddingHorizontal: 19,
     borderRadius: 15,
+    width: 120,
   },
   languageText: {
     fontSize: 14,
@@ -109,6 +127,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 4,
     elevation: 3,
+    width: 120,
   },
   dropdownItem: {
     paddingVertical: 10,

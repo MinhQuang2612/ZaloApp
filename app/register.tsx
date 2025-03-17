@@ -5,10 +5,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   FlatList,
+  Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { Ionicons } from "@expo/vector-icons"; // Import icon
+import { useSafeAreaInsets } from "react-native-safe-area-context"; // Hook đa nền tảng
 
 export default function Register() {
   const router = useRouter();
@@ -17,11 +19,20 @@ export default function Register() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [isDropdownVisible, setDropdownVisible] = useState(false);
   const [selectedCountryCode, setSelectedCountryCode] = useState("+84");
+  const insets = useSafeAreaInsets(); // Lấy giá trị vùng an toàn (trên Android, insets.top thường là 0)
 
   const countryCodes = ["+84", "+1", "+44", "+61", "+65"];
 
   return (
-    <View style={styles.container}>
+    <View style={[
+            styles.container,
+            {
+              // Trên iOS: paddingTop = insets.top để nằm sát dưới Dynamic Island
+              // Trên Android: paddingTop = 3 (giá trị mặc định, không bị ảnh hưởng bởi insets)
+              paddingTop: Platform.OS === "ios" ? insets.top : 3,
+              paddingBottom: 8, // Đảm bảo chiều cao navbar đủ lớn
+            },
+          ]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
