@@ -2,7 +2,8 @@ import { useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { changePassword, validateNewPassword } from "../services/password"; 
+import { changePassword, validateNewPassword, verifyCurrentPassword } from "../services/password";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function ChangePassword() {
   const router = useRouter();
@@ -11,14 +12,59 @@ export default function ChangePassword() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [currentPasswordError, setCurrentPasswordError] = useState<string | null>(null);
   const [newPasswordError, setNewPasswordError] = useState<string | null>(null);
   const [confirmPasswordError, setConfirmPasswordError] = useState<string | null>(null);
+
+  // Kiểm tra mật khẩu hiện tại khi người dùng nhập xong (onBlur)
+  const handleCurrentPasswordChange = async (text: string) => {
+    setCurrentPassword(text);
+    if (text.length === 0) {
+      setCurrentPasswordError(null);
+      // Cập nhật lại lỗi của newPassword nếu nó đang trùng với currentPassword
+      if (newPassword && newPassword === text) {
+        setNewPasswordError("Mật khẩu mới không được trùng với mật khẩu hiện tại.");
+      } else {
+        const error = validateNewPassword(newPassword);
+        setNewPasswordError(error);
+      }
+      return;
+    }
+
+    try {
+      const userData = await AsyncStorage.getItem("user");
+      if (!userData) {
+        setCurrentPasswordError("Không tìm thấy thông tin người dùng.");
+        return;
+      }
+
+      const user = JSON.parse(userData);
+      const phoneNumber = user.phoneNumber;
+
+      await verifyCurrentPassword(phoneNumber, text);
+      setCurrentPasswordError(null); // Mật khẩu đúng
+
+      // Cập nhật lại lỗi của newPassword nếu nó đang trùng với currentPassword
+      if (newPassword && newPassword === text) {
+        setNewPasswordError("Mật khẩu mới không được trùng với mật khẩu hiện tại.");
+      } else {
+        const error = validateNewPassword(newPassword);
+        setNewPasswordError(error);
+      }
+    } catch (error: any) {
+      setCurrentPasswordError(error.message || "Mật khẩu hiện tại không đúng.");
+    }
+  };
 
   // Kiểm tra khi người dùng nhập mật khẩu mới
   const handleNewPasswordChange = (text: string) => {
     setNewPassword(text);
-    const error = validateNewPassword(text);
-    setNewPasswordError(error);
+    if (text && text === currentPassword) {
+      setNewPasswordError("Mật khẩu mới không được trùng với mật khẩu hiện tại.");
+    } else {
+      const error = validateNewPassword(text);
+      setNewPasswordError(error);
+    }
   };
 
   // Kiểm tra khi người dùng nhập lại mật khẩu
@@ -37,6 +83,7 @@ export default function ChangePassword() {
       currentPassword.length > 0 &&
       newPassword.length > 0 &&
       confirmPassword.length > 0 &&
+      !currentPasswordError &&
       !newPasswordError &&
       !confirmPasswordError
     );
@@ -48,20 +95,20 @@ export default function ChangePassword() {
       Alert.alert("Lỗi", "Vui lòng kiểm tra lại thông tin nhập.");
       return;
     }
-  
+
     setLoading(true);
-  
+
     try {
       await changePassword(currentPassword, newPassword, confirmPassword);
-      Alert.alert("Thành công", "Mật khẩu đã được cập nhật.");
-      router.back();
+      Alert.alert("Thành công", "Mật khẩu đã được cập nhật.", [
+        { text: "OK", onPress: () => router.back() },
+      ]);
     } catch (error: any) {
-      Alert.alert("Lỗi", error.message || "Có lỗi xảy ra.");
+      Alert.alert("Lỗi", error.message || "Có lỗi xảy ra khi cập nhật mật khẩu.");
+    } finally {
+      setLoading(false);
     }
-  
-    setLoading(false);
   };
-  
 
   return (
     <View style={styles.container}>
@@ -87,11 +134,13 @@ export default function ChangePassword() {
             placeholder="Nhập mật khẩu hiện tại"
             value={currentPassword}
             onChangeText={setCurrentPassword}
+            onBlur={() => handleCurrentPasswordChange(currentPassword)} // Kiểm tra khi người dùng nhập xong
           />
           <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
             <Text style={styles.showText}>{showPassword ? "ẨN" : "HIỆN"}</Text>
           </TouchableOpacity>
         </View>
+        {currentPasswordError && <Text style={styles.errorText}>{currentPasswordError}</Text>}
 
         <Text style={styles.label}>Mật khẩu mới:</Text>
         <View style={styles.inputWrapper}>

@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Image, TextInput, ActivityIndicator, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import api from "../services/api";
 import { getCurrentUser } from "../services/auth";
 import { updateProfile } from "../services/profile";
 
+// Định nghĩa interface User khớp với dữ liệu từ API
 interface User {
   _id: string;
   username: string;
@@ -21,7 +21,7 @@ export default function ProfileDetails() {
 
   // State để chỉnh sửa
   const [username, setUsername] = useState<string>("");
-  const [dob, setDob] = useState<string>("");
+  const [dob, setDob] = useState<string>(""); // Định dạng hiển thị: DD/MM/YYYY
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -31,7 +31,11 @@ export default function ProfileDetails() {
       } else {
         setUser(userData);
         setUsername(userData.username);
-        setDob(userData.DOB);
+        // Chuyển định dạng DOB từ YYYY-MM-DD sang DD/MM/YYYY để hiển thị
+        if (userData.DOB) {
+          const [year, month, day] = userData.DOB.split("-");
+          setDob(`${day}/${month}/${year}`);
+        }
       }
       setLoading(false);
     };
@@ -39,17 +43,68 @@ export default function ProfileDetails() {
     fetchUser();
   }, []);
 
+  // Hàm chuyển định dạng ngày từ DD/MM/YYYY sang YYYY-MM-DD
+  const formatDateToApi = (date: string): string => {
+    const [day, month, year] = date.split("/");
+    return `${year}-${month}-${day}`;
+  };
+
+  // Hàm kiểm tra định dạng ngày DD/MM/YYYY
+  const isValidDateFormat = (date: string): boolean => {
+    const regex = /^\d{2}\/\d{2}\/\d{4}$/;
+    if (!regex.test(date)) return false;
+
+    const [day, month, year] = date.split("/").map(Number);
+    const dateObj = new Date(year, month - 1, day);
+    return (
+      dateObj.getDate() === day &&
+      dateObj.getMonth() + 1 === month &&
+      dateObj.getFullYear() === year &&
+      year >= 1900 &&
+      year <= new Date().getFullYear()
+    );
+  };
+
   // Xử lý cập nhật thông tin
   const handleSave = async () => {
     if (!user) return;
-  
+
+    // Kiểm tra dữ liệu đầu vào
+    if (!username.trim()) {
+      Alert.alert("Lỗi", "Tên không được để trống.");
+      return;
+    }
+
+    if (!dob) {
+      Alert.alert("Lỗi", "Ngày sinh không được để trống.");
+      return;
+    }
+
+    if (!isValidDateFormat(dob)) {
+      Alert.alert("Lỗi", "Ngày sinh không hợp lệ. Vui lòng nhập theo định dạng DD/MM/YYYY.");
+      return;
+    }
+
     try {
-      const updatedUser = await updateProfile(username, dob);
-      setUser(updatedUser); // Cập nhật UI
+      // Chuyển định dạng DOB sang YYYY-MM-DD trước khi gửi
+      const formattedDob = formatDateToApi(dob);
+      const updatedUser = await updateProfile(user._id, username, formattedDob);
+      
+      // Cập nhật state user
+      setUser({
+        ...user,
+        username: updatedUser.username,
+        DOB: updatedUser.DOB,
+      });
+      
+      // Cập nhật lại giá trị hiển thị của DOB
+      const [year, month, day] = updatedUser.DOB.split("-");
+      setDob(`${day}/${month}/${year}`);
+
       setIsEditing(false);
       Alert.alert("Thành công", "Thông tin cá nhân đã được cập nhật.");
     } catch (error: any) {
-      Alert.alert("Lỗi", error);
+      Alert.alert("Lỗi", error.message || "Không thể cập nhật thông tin.");
     }
   };
 
@@ -71,10 +126,10 @@ export default function ProfileDetails() {
       </View>
 
       <View style={styles.avatarContainer}>
-      <Image
-        source={require("../assets/images/dog_avatar.gif")}
-        style={styles.avatar}
-      />
+        <Image
+          source={require("../assets/images/dog_avatar.gif")}
+          style={styles.avatar}
+        />
       </View>
 
       <View style={styles.infoContainer}>
@@ -103,7 +158,7 @@ export default function ProfileDetails() {
               placeholder="DD/MM/YYYY"
             />
           ) : (
-            <Text style={styles.value}>{user?.DOB || "Chưa cập nhật"}</Text>
+            <Text style={styles.value}>{dob || "Chưa cập nhật"}</Text>
           )}
         </View>
 
@@ -203,4 +258,3 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 });
-
