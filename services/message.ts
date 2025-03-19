@@ -8,6 +8,8 @@ export interface Message {
   context: string;
   createdAt: string;
   groupID?: string;
+  messageID?: string;
+  seenStatus?: string[];
 }
 
 export const fetchMessages = async (receiverID: string): Promise<Message[]> => {
@@ -16,7 +18,7 @@ export const fetchMessages = async (receiverID: string): Promise<Message[]> => {
     if (!userData) throw new Error("Không tìm thấy thông tin người dùng.");
 
     const user = JSON.parse(userData);
-    const userID1 = user.userID; // userID hiện tại (75e9f681)
+    const userID1 = user.userID;
     if (!userID1 || !receiverID) throw new Error("Thiếu userID hoặc receiverID.");
 
     const response = await api.get(`/api/message/${userID1}/${receiverID}`);
@@ -27,26 +29,22 @@ export const fetchMessages = async (receiverID: string): Promise<Message[]> => {
   }
 };
 
-export const sendMessage = async (message: { receiverID: string; context: string; messageTypeID: string; groupID?: string }) => {
+export const sendMessage = async (message: {
+  senderID: string;
+  receiverID: string;
+  context: string;
+  messageTypeID: string;
+  groupID?: string;
+  messageID?: string;
+}) => {
   try {
-    const userData = await AsyncStorage.getItem("user");
-    if (!userData) throw new Error("Không tìm thấy thông tin người dùng.");
-
-    const user = JSON.parse(userData);
-    const senderID = user.userID; // Lấy userID hiện tại (75e9f681)
-
-    const fullMessage = {
-      senderID,
-      receiverID: message.receiverID,
-      context: message.context,
-      messageTypeID: message.messageTypeID,
-      groupID: message.groupID,
+    const response = await api.post("/api/message", {
+      ...message,
       createdAt: new Date().toISOString(),
-    };
-
-    const response = await api.post("/api/message", fullMessage);
+    });
     return response.data;
   } catch (error: any) {
-    console.error("Lỗi khi gửi tin nhắn:", error.message);
+    console.error("Lỗi khi gửi tin nhắn qua API:", error.message);
+    throw error;
   }
 };
