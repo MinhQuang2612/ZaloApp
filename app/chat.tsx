@@ -10,7 +10,9 @@ import {
   Modal,
   Pressable,
   Alert,
-  Image, // Thêm import Image
+  Image,
+  Platform,
+   // Thêm import Image
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -22,7 +24,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system";
 import { Video } from "expo-av";
-
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 // Định nghĩa kiểu cho response từ socket
 type SocketResponse =
   | "đang gửi"
@@ -177,7 +179,7 @@ export default function Chat() {
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [stickers, setStickers] = useState<GiphySticker[]>([]);
   const [stickerSearchTerm, setStickerSearchTerm] = useState("funny");
-
+  const insets = useSafeAreaInsets();
   // Giphy API Key
   const GIPHY_API_KEY = "ahUloRbYoMUhR2aBUDO2iyNObLH8dnMa";
 
@@ -556,7 +558,12 @@ export default function Chat() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.navbar}>
+      <View style={[styles.navbar, {
+              // Trên iOS: paddingTop = insets.top để nằm sát dưới Dynamic Island
+              // Trên Android: paddingTop = 3 (giá trị mặc định, không bị ảnh hưởng bởi insets)
+              paddingTop: Platform.OS === "ios" ? insets.top : 3,
+              paddingBottom: 8, // Đảm bảo chiều cao navbar đủ lớn
+            },]}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -650,6 +657,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#007AFF",
     paddingVertical: 15,
     paddingHorizontal: 15,
+    
   },
   username: { flex: 1, color: "#fff", fontSize: 18, fontWeight: "bold", marginLeft: 10 },
   messageContainer: {

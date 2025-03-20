@@ -6,6 +6,8 @@ import {
   Image,
   ActivityIndicator,
   Switch,
+  Platform,
+
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,7 +15,7 @@ import { useEffect, useState } from "react";
 import { getCurrentUser } from "../services/auth";
 import Footer from "../components/Footer";
 import { logoutUser } from "../services/auth";
-
+import { useSafeAreaInsets } from "react-native-safe-area-context"; // Thư viện hỗ trợ lấy thông tin vùng an toàn
 interface User {
   _id: string;
   userID: string;

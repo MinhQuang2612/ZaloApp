@@ -12,7 +12,29 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { registerUser } from "../services/register";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import { Provider as PaperProvider } from "react-native-paper";
+import { DatePickerModal } from "react-native-paper-dates";
+
+// Khai báo kiểu thủ công cho DatePickerModal
+interface CustomDatePickerModalProps {
+  locale?: string;
+  mode: "single" | "range" | "multiple";
+  visible: boolean;
+  onDismiss: () => void;
+  date?: Date;
+  onConfirm: (params: { date: Date | null }) => void;
+  validRange?: {
+    startDate?: Date;
+    endDate?: Date;
+  };
+  saveLabel?: string;
+  closeLabel?: string;
+  label?: string;
+  saveLabelDisabled?: boolean;
+}
+
+// Ép kiểu DatePickerModal để sử dụng kiểu thủ công
+const CustomDatePickerModal = DatePickerModal as React.ComponentType<CustomDatePickerModalProps>;
 
 export default function Register() {
   const router = useRouter();
@@ -21,7 +43,8 @@ export default function Register() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
-  const [DOB, setDOB] = useState<Date | null>(null); // Lưu dưới dạng Date object
+  const [DOB, setDOB] = useState<Date | null>(null);
+  const [openDatePicker, setOpenDatePicker] = useState(false);
   const insets = useSafeAreaInsets();
 
   const handleRegister = async () => {
@@ -39,7 +62,7 @@ export default function Register() {
       phoneNumber,
       password,
       username,
-      DOB: formattedDOB, // Gửi dạng 20/03/2025
+      DOB: formattedDOB,
     };
     console.log("User data before calling API:", userData);
     const registeredUser = await registerUser(userData);
@@ -48,134 +71,156 @@ export default function Register() {
     }
   };
 
-  const onDateChange = (event: any, selectedDate?: Date) => {
-    const currentDate = selectedDate || DOB;
-    setDOB(currentDate);
+  const formatDateForAPI = (date: Date) => {
+    return date.toISOString().split("T")[0];
   };
 
-  const formatDateForAPI = (date: Date) => {
-    return date.toISOString().split('T')[0];// Định dạng 20/03/2025 để gửi API
+  const formatDateForDisplay = (date: Date | null) => {
+    if (!date) return "Chọn ngày sinh";
+    return date.toLocaleDateString("vi-VN", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
   };
 
   return (
-    <View
-      style={[
-        styles.container,
-        { paddingTop: Platform.OS === "ios" ? insets.top : 3, paddingBottom: 8 },
-      ]}
-    >
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#007AFF" />
-        </TouchableOpacity>
-        <Text style={styles.sub}>Đăng ký</Text>
-      </View>
-
-      <Text style={styles.title}>Đăng ký tài khoản</Text>
-
-      {/* Phone Number */}
-      <TextInput
-        style={styles.input}
-        placeholder="Số điện thoại"
-        keyboardType="phone-pad"
-        value={phoneNumber}
-        onChangeText={setPhoneNumber}
-      />
-
-      {/* Password */}
-      <TextInput
-        style={styles.input}
-        placeholder="Mật khẩu"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
-
-      {/* Username */}
-      <TextInput
-        style={styles.input}
-        placeholder="Tên người dùng"
-        value={username}
-        onChangeText={setUsername}
-      />
-
-      {/* Date of Birth */}
-      <View style={styles.datePickerRow}>
-        <Text style={styles.dateLabel}>Chọn ngày sinh</Text>
-        <View style={styles.datePickerContainer}>
-          <DateTimePicker
-            value={DOB || new Date()}
-            mode="date"
-            display={Platform.OS === "ios" ? "default" : "calendar"}
-            onChange={onDateChange}
-            maximumDate={new Date()}
-            style={styles.datePicker}
-          />
-        </View>
-      </View>
-
-      {/* Checkbox */}
-      <View style={styles.checkboxContainer}>
-        <TouchableOpacity
-          onPress={() => setTermsAccepted(!isTermsAccepted)}
-          style={[
-            styles.customCheckbox,
-            isTermsAccepted && styles.checkboxChecked,
-          ]}
-        >
-          {isTermsAccepted && <Ionicons name="checkmark" size={18} color="white" />}
-        </TouchableOpacity>
-        <Text style={styles.checkboxLabel}>
-          Tôi đồng ý với các <Text style={styles.link}>điều khoản sử dụng Zalo</Text>
-        </Text>
-      </View>
-
-      <View style={styles.checkboxContainer}>
-        <TouchableOpacity
-          onPress={() => setSocialAccepted(!isSocialAccepted)}
-          style={[
-            styles.customCheckbox,
-            isSocialAccepted && styles.checkboxChecked,
-          ]}
-        >
-          {isSocialAccepted && <Ionicons name="checkmark" size={18} color="white" />}
-        </TouchableOpacity>
-        <Text style={styles.checkboxLabel}>
-          Tôi đồng ý với <Text style={styles.link}>điều khoản Mạng xã hội của Zalo</Text>
-        </Text>
-      </View>
-
-      {/* Button */}
-      <TouchableOpacity
+    <PaperProvider>
+      <View
         style={[
-          styles.button,
-          isTermsAccepted && isSocialAccepted && phoneNumber && password && username && DOB
-            ? styles.buttonActive
-            : styles.buttonDisabled,
+          styles.container,
+          { paddingTop: Platform.OS === "ios" ? insets.top : 3, paddingBottom: 8 },
         ]}
-        onPress={handleRegister}
-        disabled={!isTermsAccepted || !isSocialAccepted || !phoneNumber || !password || !username || !DOB}
       >
-        <Text
-          style={[
-            styles.buttonText,
-            isTermsAccepted && isSocialAccepted && phoneNumber && password && username && DOB
-              ? styles.buttonTextActive
-              : styles.buttonTextDisabled,
-          ]}
-        >
-          Đăng ký
-        </Text>
-      </TouchableOpacity>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#007AFF" />
+          </TouchableOpacity>
+          <Text style={styles.sub}>Đăng ký</Text>
+        </View>
 
-      <Text style={styles.registerText}>
-        Bạn đã có tài khoản?{" "}
-        <Text style={styles.registerLink} onPress={() => router.push("/login")}>
-          Đăng nhập ngay
+        <Text style={styles.title}>Đăng ký tài khoản</Text>
+
+        {/* Phone Number */}
+        <TextInput
+          style={styles.input}
+          placeholder="Số điện thoại"
+          keyboardType="phone-pad"
+          value={phoneNumber}
+          onChangeText={setPhoneNumber}
+        />
+
+        {/* Password */}
+        <TextInput
+          style={styles.input}
+          placeholder="Mật khẩu"
+          secureTextEntry
+          value={password}
+          onChangeText={setPassword}
+        />
+
+        {/* Username */}
+        <TextInput
+          style={styles.input}
+          placeholder="Tên người dùng"
+          value={username}
+          onChangeText={setUsername}
+        />
+
+        {/* Date of Birth */}
+        <View style={styles.datePickerRow}>
+          <Text style={styles.dateLabel}>Ngày sinh</Text>
+          <TouchableOpacity
+            style={styles.datePickerContainer}
+            onPress={() => setOpenDatePicker(true)}
+          >
+            <Text style={styles.dateText}>{formatDateForDisplay(DOB)}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Date Picker Modal */}
+        <CustomDatePickerModal
+          locale="vi"
+          mode="single"
+          visible={openDatePicker}
+          onDismiss={() => setOpenDatePicker(false)}
+          date={DOB || new Date()}
+          onConfirm={({ date }) => {
+            setOpenDatePicker(false);
+            setDOB(date ? new Date(date) : null);
+          }}
+          validRange={{
+            endDate: new Date(),
+          }}
+          saveLabel="Xác nhận"
+          closeLabel="Hủy"
+          label="Chọn ngày sinh"
+          saveLabelDisabled={false}
+        />
+
+        {/* Checkbox */}
+        <View style={styles.checkboxContainer}>
+          <TouchableOpacity
+            onPress={() => setTermsAccepted(!isTermsAccepted)}
+            style={[
+              styles.customCheckbox,
+              isTermsAccepted && styles.checkboxChecked,
+            ]}
+          >
+            {isTermsAccepted && <Ionicons name="checkmark" size={18} color="white" />}
+          </TouchableOpacity>
+          <Text style={styles.checkboxLabel}>
+            Tôi đồng ý với các <Text style={styles.link}>điều khoản sử dụng Zalo</Text>
+          </Text>
+        </View>
+
+        <View style={styles.checkboxContainer}>
+          <TouchableOpacity
+            onPress={() => setSocialAccepted(!isSocialAccepted)}
+            style={[
+              styles.customCheckbox,
+              isSocialAccepted && styles.checkboxChecked,
+            ]}
+          >
+            {isSocialAccepted && <Ionicons name="checkmark" size={18} color="white" />}
+          </TouchableOpacity>
+          <Text style={styles.checkboxLabel}>
+            Tôi đồng ý với <Text style={styles.link}>điều khoản Mạng xã hội của Zalo</Text>
+          </Text>
+        </View>
+
+        {/* Button */}
+        <TouchableOpacity
+          style={[
+            styles.button,
+            isTermsAccepted && isSocialAccepted && phoneNumber && password && username && DOB
+              ? styles.buttonActive
+              : styles.buttonDisabled,
+          ]}
+          onPress={handleRegister}
+          disabled={!isTermsAccepted || !isSocialAccepted || !phoneNumber || !password || !username || !DOB}
+        >
+          <Text
+            style={[
+              styles.buttonText,
+              isTermsAccepted && isSocialAccepted && phoneNumber && password && username && DOB
+                ? styles.buttonTextActive
+                : styles.buttonTextDisabled,
+            ]}
+          >
+            Đăng ký
+          </Text>
+        </TouchableOpacity>
+
+        <Text style={styles.registerText}>
+          Bạn đã có tài khoản?{" "}
+          <Text style={styles.registerLink} onPress={() => router.push("/login")}>
+            Đăng nhập ngay
+          </Text>
         </Text>
-      </Text>
-    </View>
+      </View>
+    </PaperProvider>
   );
 }
 
@@ -225,16 +270,23 @@ const styles = StyleSheet.create({
   },
   dateLabel: {
     fontSize: 16,
-    color: "#007AFF", // Màu xám giống placeholder của TextInput
+    color: "#007AFF",
     marginRight: 10,
-    width: 120, // Cố định chiều rộng để căn chỉnh
+    width: 120,
     fontWeight: "bold",
   },
   datePickerContainer: {
     flex: 1,
+    borderWidth: 1,
+    borderColor: "#007AFF",
+    borderRadius: 8,
+    height: 40,
+    justifyContent: "center",
+    paddingHorizontal: 10,
   },
-  datePicker: {
-    width: "100%",
+  dateText: {
+    fontSize: 16,
+    color: "#000",
   },
   checkboxContainer: {
     flexDirection: "row",

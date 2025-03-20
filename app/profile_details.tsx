@@ -16,7 +16,29 @@ import { Ionicons } from "@expo/vector-icons";
 import { getCurrentUser } from "../services/auth";
 import { updateProfile } from "../services/profile";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import { Provider as PaperProvider } from "react-native-paper";
+import { DatePickerModal } from "react-native-paper-dates";
+
+// Khai báo kiểu thủ công cho DatePickerModal
+interface CustomDatePickerModalProps {
+  locale?: string;
+  mode: "single" | "range" | "multiple";
+  visible: boolean;
+  onDismiss: () => void;
+  date?: Date;
+  onConfirm: (params: { date: Date | null }) => void;
+  validRange?: {
+    startDate?: Date;
+    endDate?: Date;
+  };
+  saveLabel?: string;
+  closeLabel?: string;
+  label?: string;
+  saveLabelDisabled?: boolean;
+}
+
+// Ép kiểu DatePickerModal để sử dụng kiểu thủ công
+const CustomDatePickerModal = DatePickerModal as React.ComponentType<CustomDatePickerModalProps>;
 
 // Định nghĩa interface User khớp với dữ liệu từ API
 interface User {
@@ -32,32 +54,30 @@ export default function ProfileDetails() {
   const [loading, setLoading] = useState<boolean>(true);
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [username, setUsername] = useState<string>("");
-  const [dob, setDob] = useState<Date>(new Date()); // Khởi tạo mặc định là ngày hiện tại
-  const [displayDob, setDisplayDob] = useState<string>(""); // Định dạng hiển thị: DD/MM/YYYY
+  const [dob, setDob] = useState<Date>(new Date());
+  const [displayDob, setDisplayDob] = useState<string>("");
+  const [openDatePicker, setOpenDatePicker] = useState(false);
   const insets = useSafeAreaInsets();
 
-  // Hàm chuyển định dạng từ yyyy-mm-dd sang dd/mm/yyyy
   const formatDateForDisplay = (dateString: string): string => {
     try {
-      // Giả sử dateString là yyyy-mm-dd
       const date = new Date(dateString);
       if (isNaN(date.getTime())) {
-        return "Chưa cập nhật"; // Nếu không parse được, trả về giá trị mặc định
+        return "Chưa cập nhật";
       }
       return date.toLocaleDateString("vi-VN", {
         day: "2-digit",
         month: "2-digit",
         year: "numeric",
-      }); // Trả về dd/mm/yyyy, ví dụ: 18/10/2003
+      });
     } catch (error) {
       console.error("Error parsing date:", error);
       return "Chưa cập nhật";
     }
   };
 
-  // Hàm chuyển định dạng từ Date object sang yyyy-mm-dd
   const formatDateToApi = (date: Date): string => {
-    return date.toISOString().split("T")[0]; // Trả về yyyy-mm-dd, ví dụ: 2003-10-18
+    return date.toISOString().split("T")[0];
   };
 
   useEffect(() => {
@@ -68,19 +88,17 @@ export default function ProfileDetails() {
       } else {
         setUser(userData);
         setUsername(userData.username);
-        // Chuyển định dạng DOB để hiển thị
         setDisplayDob(formatDateForDisplay(userData.DOB));
-        // Chuyển DOB thành Date object để dùng trong DateTimePicker
         try {
           const date = new Date(userData.DOB);
           if (!isNaN(date.getTime())) {
             setDob(date);
           } else {
-            setDob(new Date()); // Nếu không parse được, dùng ngày hiện tại
+            setDob(new Date());
           }
         } catch (error) {
           console.error("Error parsing DOB for DateTimePicker:", error);
-          setDob(new Date()); // Giá trị mặc định nếu lỗi
+          setDob(new Date());
         }
       }
       setLoading(false);
@@ -89,11 +107,9 @@ export default function ProfileDetails() {
     fetchUser();
   }, []);
 
-  // Xử lý cập nhật thông tin
   const handleSave = async () => {
     if (!user) return;
 
-    // Kiểm tra dữ liệu đầu vào
     if (!username.trim()) {
       Alert.alert("Lỗi", "Tên không được để trống.");
       return;
@@ -122,90 +138,105 @@ export default function ProfileDetails() {
     }
   };
 
-  const onDateChange = (event: any, selectedDate?: Date) => {
-    const currentDate = selectedDate || dob;
-    setDob(currentDate);
-  };
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-      </View>
-    );
-  }
-
   return (
-    <View
-      style={[
-        styles.container,
-        {
-          paddingTop: Platform.OS === "ios" ? insets.top : 3,
-          paddingBottom: 8,
-        },
-      ]}
-    >
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#007AFF" />
-        </TouchableOpacity>
-        <Text style={styles.title}>Thông tin cá nhân</Text>
-      </View>
-
-      <View style={styles.avatarContainer}>
-        <Image
-          source={require("../assets/images/dog_avatar.gif")}
-          style={styles.avatar}
-        />
-      </View>
-
-      <View style={styles.infoContainer}>
-        <View style={styles.infoItem}>
-          <Ionicons name="person" size={22} color="#007AFF" />
-          <Text style={styles.label}>Tên Zalo</Text>
-          {isEditing ? (
-            <TextInput
-              style={styles.input}
-              value={username}
-              onChangeText={setUsername}
-            />
-          ) : (
-            <Text style={styles.value}>{user?.username || "Không có tên"}</Text>
-          )}
-        </View>
-
-        <View style={styles.infoItem}>
-          <Ionicons name="calendar" size={22} color="#007AFF" />
-          <Text style={styles.label}>Ngày sinh</Text>
-          {isEditing ? (
-            <DateTimePicker
-              value={dob}
-              mode="date"
-              display={Platform.OS === "ios" ? "default" : "calendar"}
-              onChange={onDateChange}
-              maximumDate={new Date()}
-              style={styles.datePicker}
-            />
-          ) : (
-            <Text style={styles.value}>{displayDob || "Chưa cập nhật"}</Text>
-          )}
-        </View>
-
-        <View style={styles.infoItem}>
-          <Ionicons name="call" size={22} color="#007AFF" />
-          <Text style={styles.label}>Số điện thoại</Text>
-          <Text style={styles.value}>{user?.phoneNumber || "Không có số"}</Text>
-        </View>
-      </View>
-
-      <TouchableOpacity
-        style={styles.editButton}
-        onPress={isEditing ? handleSave : () => setIsEditing(true)}
+    <PaperProvider>
+      <View
+        style={[
+          styles.container,
+          {
+            paddingTop: Platform.OS === "ios" ? insets.top : 3,
+            paddingBottom: 8,
+          },
+        ]}
       >
-        <Ionicons name="create" size={20} color={isEditing ? "#fff" : "#000"} />
-        <Text style={styles.editButtonText}>{isEditing ? "Lưu" : "Chỉnh sửa"}</Text>
-      </TouchableOpacity>
-    </View>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#007AFF" />
+          </TouchableOpacity>
+          <Text style={styles.title}>Thông tin cá nhân</Text>
+        </View>
+
+        <View style={styles.avatarContainer}>
+          <Image
+            source={require("../assets/images/dog_avatar.gif")}
+            style={styles.avatar}
+          />
+        </View>
+
+        <View style={styles.infoContainer}>
+          <View style={styles.infoItem}>
+            <Ionicons name="person" size={22} color="#007AFF" />
+            <Text style={styles.label}>Tên Zalo</Text>
+            {isEditing ? (
+              <TextInput
+                style={styles.input}
+                value={username}
+                onChangeText={setUsername}
+              />
+            ) : (
+              <Text style={styles.value}>{user?.username || "Không có tên"}</Text>
+            )}
+          </View>
+
+          <View style={styles.infoItem}>
+            <Ionicons name="calendar" size={22} color="#007AFF" />
+            <Text style={styles.label}>Ngày sinh</Text>
+            {isEditing ? (
+              <TouchableOpacity
+                style={styles.datePickerContainer}
+                onPress={() => setOpenDatePicker(true)}
+              >
+                <Text style={styles.dateText}>
+                  {dob.toLocaleDateString("vi-VN", {
+                    day: "2-digit",
+                    month: "2-digit",
+                    year: "numeric",
+                  })}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.value}>{displayDob || "Chưa cập nhật"}</Text>
+            )}
+          </View>
+
+          <View style={styles.infoItem}>
+            <Ionicons name="call" size={22} color="#007AFF" />
+            <Text style={styles.label}>Số điện thoại</Text>
+            <Text style={styles.value}>{user?.phoneNumber || "Không có số"}</Text>
+          </View>
+        </View>
+
+        {/* Date Picker Modal */}
+        {isEditing && (
+          <CustomDatePickerModal
+            locale="vi"
+            mode="single"
+            visible={openDatePicker}
+            onDismiss={() => setOpenDatePicker(false)}
+            date={dob}
+            onConfirm={({ date }) => {
+              setOpenDatePicker(false);
+              setDob(date ? new Date(date) : new Date());
+            }}
+            validRange={{
+              endDate: new Date(),
+            }}
+            saveLabel="Xác nhận"
+            closeLabel="Hủy"
+            label="Chọn ngày sinh"
+            saveLabelDisabled={false}
+          />
+        )}
+
+        <TouchableOpacity
+          style={styles.editButton}
+          onPress={isEditing ? handleSave : () => setIsEditing(true)}
+        >
+          <Ionicons name="create" size={20} color={isEditing ? "#fff" : "#000"} />
+          <Text style={styles.editButtonText}>{isEditing ? "Lưu" : "Chỉnh sửa"}</Text>
+        </TouchableOpacity>
+      </View>
+    </PaperProvider>
   );
 }
 
@@ -265,8 +296,16 @@ const styles = StyleSheet.create({
     borderBottomColor: "#007AFF",
     paddingBottom: 5,
   },
-  datePicker: {
+  datePickerContainer: {
     flex: 1,
+    borderBottomWidth: 1,
+    borderBottomColor: "#007AFF",
+    paddingBottom: 5,
+    justifyContent: "center",
+  },
+  dateText: {
+    fontSize: 16,
+    color: "#333",
   },
   editButton: {
     backgroundColor: "#007AFF",
