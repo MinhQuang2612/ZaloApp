@@ -113,7 +113,6 @@ const MessageItem = ({
                 source={{ uri: videoUri }}
                 style={styles.video}
                 useNativeControls
-                resizeMode="cover"
                 onError={(e) => {
                   console.log("Error loading video:", e);
                   setError("Không thể phát video");
@@ -668,7 +667,7 @@ const styles = StyleSheet.create({
   sticker: { width: 100, height: 100, marginVertical: 5 },
   image: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
   videoContainer: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
-  video: { width: "100%", height: "100%", borderRadius: 10 },
+  video: { width: "100%", height: "100%", borderRadius: 10, resizeMode: "cover" },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
