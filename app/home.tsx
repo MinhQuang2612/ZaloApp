@@ -1,5 +1,14 @@
 import { useEffect, useState } from "react";
-import { View, FlatList, StyleSheet, Image, TouchableOpacity, Text, ActivityIndicator, RefreshControl } from "react-native";
+import {
+  View,
+  FlatList,
+  StyleSheet,
+  Image,
+  TouchableOpacity,
+  Text,
+  ActivityIndicator,
+  RefreshControl,
+} from "react-native";
 import { useRouter } from "expo-router";
 import { io, Socket } from "socket.io-client";
 import Navbar from "../components/Navbar";
@@ -7,16 +16,62 @@ import Footer from "../components/Footer";
 import { fetchMessages, Message } from "../services/message";
 import { fetchContacts, Contact } from "../services/contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { EventRegister } from "react-native-event-listeners"; // Thêm thư viện để phát sự kiện tùy chỉnh
+import { EventRegister } from "react-native-event-listeners";
+
+// Định nghĩa kiểu cho message trong Home
+type HomeMessage = {
+  senderID: string;
+  context: string;
+  createdAt: string;
+  unread?: boolean;
+  messageID?: string;
+  messageTypeID?: string; // Thêm trường này để xác định loại tin nhắn
+};
 
 export default function Home() {
-  const [messages, setMessages] = useState<{ senderID: string; context: string; createdAt: string; unread?: boolean; messageID?: string }[]>([]);
+  const [messages, setMessages] = useState<HomeMessage[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentUserID, setCurrentUserID] = useState<string | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const router = useRouter();
+
+  // Hàm xác định loại tin nhắn dựa trên context
+  const determineMessageType = (message: HomeMessage): string => {
+    const { context, messageTypeID } = message;
+
+    if (context.startsWith("https://media") && context.includes("giphy.com")) {
+      return "type4";
+    }
+    if (context.startsWith("data:image/")) {
+      return "type2";
+    }
+    if (context.match(/\.(mp4|mov|avi)$/i)) {
+      return "type3";
+    }
+    return messageTypeID || "type1";
+  };
+
+  // Hàm trả về nội dung hiển thị trong trang Home
+  const getMessagePreview = (message: HomeMessage): string => {
+    const effectiveType = determineMessageType(message);
+
+    switch (effectiveType) {
+      case "type1":
+        return message.context.length > 50
+          ? message.context.substring(0, 50) + "..."
+          : message.context;
+      case "type2":
+        return "Đã gửi ảnh";
+      case "type3":
+        return "Đã gửi video";
+      case "type4":
+        return "Đã gửi sticker";
+      default:
+        return "Tin nhắn không xác định";
+    }
+  };
 
   const loadMessages = async () => {
     try {
@@ -38,7 +93,7 @@ export default function Home() {
         return;
       }
 
-      const allMessages: { senderID: string; context: string; createdAt: string; unread?: boolean; messageID?: string }[] = [];
+      const allMessages: HomeMessage[] = [];
       const seenMessageIDs = new Set<string>();
 
       for (const contact of contactsData) {
@@ -58,6 +113,7 @@ export default function Home() {
             context: latestMessage.context,
             createdAt: latestMessage.createdAt,
             messageID: latestMessage.messageID,
+            messageTypeID: latestMessage.messageTypeID, // Lưu messageTypeID
             unread: latestMessage.receiverID === userID && !latestMessage.seenStatus?.includes(userID),
           });
         }
@@ -78,11 +134,11 @@ export default function Home() {
       await loadMessages();
 
       if (!currentUserID) {
-        console.error("currentUserID không hợp lệ:", currentUserID);
+        //console.error("currentUserID không hợp lệ:", currentUserID);
         return;
       }
 
-      const newSocket = io("http://192.168.2.158:3000");
+      const newSocket = io("http://172.20.34.14:3000");
       setSocket(newSocket);
 
       newSocket.emit("joinUserRoom", currentUserID);
@@ -92,21 +148,20 @@ export default function Home() {
         if (message.receiverID === currentUserID || message.senderID === currentUserID) {
           setMessages((prev) => {
             const senderID = message.senderID === currentUserID ? message.receiverID : message.senderID;
-            const newMessage = {
+            const newMessage: HomeMessage = {
               senderID,
               context: message.context,
               createdAt: message.createdAt,
               messageID: message.messageID,
+              messageTypeID: message.messageTypeID, // Lưu messageTypeID
               unread: message.receiverID === currentUserID && !message.seenStatus?.includes(currentUserID),
             };
 
             console.log("Home.tsx: New message processed:", newMessage, "Unread:", newMessage.unread);
 
-            // Kiểm tra xem đã có tin nhắn từ senderID này chưa
             const existingIndex = prev.findIndex((msg) => msg.senderID === senderID);
 
             if (existingIndex >= 0) {
-              // Nếu đã có tin nhắn từ senderID này, thay thế tin nhắn cũ bằng tin nhắn mới
               const updatedMessages = [...prev];
               updatedMessages[existingIndex] = newMessage;
               const sortedMessages = updatedMessages.sort(
@@ -116,7 +171,6 @@ export default function Home() {
               return sortedMessages;
             }
 
-            // Nếu chưa có tin nhắn từ senderID này, thêm tin nhắn mới vào danh sách
             const updatedMessages = [newMessage, ...prev].sort(
               (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
             );
@@ -137,7 +191,6 @@ export default function Home() {
         });
       });
 
-      // Lắng nghe sự kiện tùy chỉnh từ chat.tsx để reload danh sách tin nhắn
       const listener = EventRegister.addEventListener("messageSent", () => {
         console.log("Home.tsx: Received messageSent event, reloading messages...");
         loadMessages();
@@ -171,7 +224,11 @@ export default function Home() {
     );
   }
 
-  const renderItem = ({ item }: { item: { senderID: string; context: string; createdAt: string; unread?: boolean; messageID?: string } }) => (
+  const renderItem = ({
+    item,
+  }: {
+    item: { senderID: string; context: string; createdAt: string; unread?: boolean; messageID?: string; messageTypeID?: string };
+  }) => (
     <TouchableOpacity
       style={styles.item}
       onPress={() => router.push({ pathname: "/chat", params: { userID: item.senderID } })}
@@ -179,7 +236,7 @@ export default function Home() {
       <Image source={{ uri: "https://randomuser.me/api/portraits/men/1.jpg" }} style={styles.avatar} />
       <View style={styles.messageContent}>
         <Text style={styles.name}>{getUserName(item.senderID)}</Text>
-        <Text style={styles.message}>{item.context || "Không có nội dung"}</Text>
+        <Text style={styles.message}>{getMessagePreview(item)}</Text>
       </View>
       <View style={styles.rightContainer}>
         <Text style={styles.time}>{new Date(item.createdAt).toLocaleTimeString()}</Text>

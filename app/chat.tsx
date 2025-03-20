@@ -1,11 +1,27 @@
-import { useState, useEffect, useRef } from "react";
-import { View, Text, TextInput, TouchableOpacity, FlatList, Image, StyleSheet, ActivityIndicator } from "react-native";
+import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  StyleSheet,
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  Alert,
+  Image, // Thêm import Image
+} from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { io, Socket } from "socket.io-client";
 import { fetchMessages, sendMessage, Message } from "../services/message";
 import { fetchUserByID } from "../services/contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
+import * as FileSystem from "expo-file-system";
+import { Video } from "expo-av";
 
 // Định nghĩa kiểu cho response từ socket
 type SocketResponse =
@@ -18,6 +34,134 @@ type SocketResponse =
   | "Đã cập nhật seenStatus chat nhóm"
   | string;
 
+// Định nghĩa kiểu cho sticker từ Giphy
+type GiphySticker = {
+  id: string;
+  images: {
+    original: {
+      url: string;
+    };
+  };
+};
+
+// Component con để render từng tin nhắn
+const MessageItem = ({
+  item,
+  currentUserID,
+  userID,
+}: {
+  item: Message;
+  currentUserID: string | null;
+  userID: string | undefined;
+}) => {
+  const effectiveType = determineMessageType(item);
+  const [videoUri, setVideoUri] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (effectiveType === "type3") {
+      if (item.context.startsWith("data:video/")) {
+        const base64Data = item.context.split(",")[1];
+        const filePath = `${FileSystem.cacheDirectory}video-${item.messageID}.mp4`;
+
+        FileSystem.writeAsStringAsync(filePath, base64Data, {
+          encoding: FileSystem.EncodingType.Base64,
+        })
+          .then(() => {
+            setVideoUri(filePath);
+          })
+          .catch((err) => {
+            console.error("Lỗi khi tạo file video tạm thời:", err);
+            setError("Không thể tải video");
+          });
+      } else {
+        setVideoUri(item.context);
+      }
+    }
+  }, [item.context, effectiveType]);
+
+  return (
+    <View
+      style={[
+        styles.messageContainer,
+        item.senderID === currentUserID ? styles.myMessage : styles.otherMessage,
+      ]}
+    >
+      {item.senderID !== currentUserID && (
+        <Image
+          source={{ uri: "https://randomuser.me/api/portraits/men/1.jpg" }}
+          style={styles.avatar}
+          onError={(e) => console.log("Error loading avatar:", e.nativeEvent.error)}
+        />
+      )}
+      <View style={styles.messageBox}>
+        {effectiveType === "type1" && <Text style={styles.messageText}>{item.context}</Text>}
+        {effectiveType === "type2" && (
+          <Image
+            source={{ uri: item.context }}
+            style={styles.image}
+            resizeMode="cover"
+            onError={(e) => console.log("Error loading image:", e.nativeEvent.error)}
+          />
+        )}
+        {effectiveType === "type3" && (
+          <View style={styles.videoContainer}>
+            {error ? (
+              <Text style={{ color: "red" }}>{error}</Text>
+            ) : videoUri ? (
+              <Video
+                source={{ uri: videoUri }}
+                style={styles.video}
+                useNativeControls
+                resizeMode="cover"
+                onError={(e) => {
+                  console.log("Error loading video:", e);
+                  setError("Không thể phát video");
+                }}
+                onLoad={() => console.log("Video loaded successfully")}
+              />
+            ) : (
+              <Text>Đang tải video...</Text>
+            )}
+          </View>
+        )}
+        {effectiveType === "type4" && (
+          <Image
+            source={{ uri: item.context }}
+            style={styles.sticker}
+            resizeMode="contain"
+            onError={(e) => console.log("Error loading sticker:", e.nativeEvent.error)}
+          />
+        )}
+        {item.senderID === currentUserID && (
+          <Text style={styles.seenText}>
+            {item.seenStatus?.includes(userID!) ? "Đã xem" : "Đã gửi"}
+          </Text>
+        )}
+      </View>
+    </View>
+  );
+};
+
+// Hàm xác định loại tin nhắn
+const determineMessageType = (message: Message): string => {
+  const { context, messageTypeID } = message;
+
+  if (context.startsWith("https://media") && context.includes("giphy.com")) {
+    return "type4";
+  }
+  if (context.startsWith("data:image/")) {
+    return "type2";
+  }
+  if (context.startsWith("data:video/")) {
+    return "type3";
+  }
+  if (context.match(/\.(mp4|mov|avi)$/i)) {
+    return "type3";
+  }
+  return messageTypeID;
+};
+
 export default function Chat() {
   const { userID } = useLocalSearchParams<{ userID?: string }>();
   const router = useRouter();
@@ -29,6 +173,32 @@ export default function Chat() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [markedAsSeen, setMarkedAsSeen] = useState<Set<string>>(new Set());
   const flatListRef = useRef<FlatList>(null);
+
+  // State cho sticker picker
+  const [showStickerPicker, setShowStickerPicker] = useState(false);
+  const [stickers, setStickers] = useState<GiphySticker[]>([]);
+  const [stickerSearchTerm, setStickerSearchTerm] = useState("funny");
+
+  // Giphy API Key
+  const GIPHY_API_KEY = "ahUloRbYoMUhR2aBUDO2iyNObLH8dnMa";
+
+  // Fetch stickers từ Giphy API
+  const fetchStickers = async (term: string) => {
+    try {
+      const BASE_URL = "http://api.giphy.com/v1/stickers/search";
+      const res = await fetch(`${BASE_URL}?api_key=${GIPHY_API_KEY}&q=${term}&limit=10`);
+      const resJson = await res.json();
+      setStickers(resJson.data);
+    } catch (error) {
+      console.error("Lỗi khi lấy sticker từ Giphy:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (showStickerPicker) {
+      fetchStickers(stickerSearchTerm);
+    }
+  }, [stickerSearchTerm, showStickerPicker]);
 
   useEffect(() => {
     const initializeSocketAndData = async () => {
@@ -79,7 +249,7 @@ export default function Chat() {
         return;
       }
 
-      const newSocket = io("http://192.168.2.158:3000");
+      const newSocket = io("http://172.20.34.14:3000");
       setSocket(newSocket);
 
       newSocket.emit("joinUserRoom", userIDValue);
@@ -129,7 +299,10 @@ export default function Chat() {
   useEffect(() => {
     if (currentUserID && socket && messages.length > 0) {
       const unreadMessages = messages.filter(
-        (msg) => msg.receiverID === currentUserID && !msg.seenStatus?.includes(currentUserID) && !markedAsSeen.has(msg.messageID!)
+        (msg) =>
+          msg.receiverID === currentUserID &&
+          !msg.seenStatus?.includes(currentUserID) &&
+          !markedAsSeen.has(msg.messageID!)
       );
       console.log("Unread messages to mark as seen:", unreadMessages);
       unreadMessages.forEach((msg) => {
@@ -155,7 +328,6 @@ export default function Chat() {
       messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
-      // Không cần gán groupID vì nó là tùy chọn và không sử dụng
     };
 
     setMessages((prev) => {
@@ -183,11 +355,197 @@ export default function Chat() {
     });
   };
 
+  const handleSendSticker = (stickerUrl: string) => {
+    if (!stickerUrl.startsWith("https://")) {
+      Alert.alert("Lỗi", "Sticker URL không hợp lệ.");
+      return;
+    }
+    if (!userID || !currentUserID || !socket) return;
+
+    const messageID = `${socket.id}-${Date.now()}`;
+    const newMessage: Message = {
+      senderID: currentUserID,
+      receiverID: userID,
+      messageTypeID: "type4",
+      context: stickerUrl,
+      messageID,
+      createdAt: new Date().toISOString(),
+      seenStatus: [],
+    };
+
+    setMessages((prev) => [...prev, newMessage]);
+    setShowStickerPicker(false);
+
+    socket.emit("sendTextMessage", newMessage, async (response: SocketResponse) => {
+      console.log("Server response for sticker:", response);
+      if (response !== "đã nhận") {
+        setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+      } else {
+        await sendMessage({
+          senderID: currentUserID,
+          receiverID: userID,
+          context: stickerUrl,
+          messageTypeID: "type4",
+          messageID,
+        }).catch((error) => {
+          console.error("Lỗi đồng bộ API khi gửi sticker:", error);
+        });
+      }
+    });
+  };
+
+  const handleSendImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert(
+        "Quyền truy cập bị từ chối",
+        "Ứng dụng cần quyền truy cập thư viện ảnh để gửi ảnh. Vui lòng cấp quyền trong cài đặt."
+      );
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+    });
+
+    if (result.canceled) {
+      console.log("User cancelled image picker");
+      return;
+    }
+
+    const imageUri = result.assets[0].uri;
+    if (!imageUri || !userID || !currentUserID || !socket) return;
+
+    // Nén ảnh trước khi chuyển thành base64
+    const manipulatedImage = await ImageManipulator.manipulateAsync(
+      imageUri,
+      [{ resize: { width: 300 } }],
+      { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+    );
+
+    const imageBase64 = manipulatedImage.base64;
+    if (!imageBase64) {
+      Alert.alert("Lỗi", "Không thể nén ảnh. Vui lòng thử lại.");
+      return;
+    }
+
+    const messageID = `${socket.id}-${Date.now()}`;
+    const newMessage: Message = {
+      senderID: currentUserID,
+      receiverID: userID,
+      messageTypeID: "type2",
+      context: `data:image/jpeg;base64,${imageBase64}`,
+      messageID,
+      createdAt: new Date().toISOString(),
+      seenStatus: [],
+    };
+
+    setMessages((prev) => [...prev, newMessage]);
+
+    socket.emit("sendTextMessage", newMessage, async (response: SocketResponse) => {
+      console.log("Server response for image:", response);
+      if (response !== "đã nhận") {
+        setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+      } else {
+        await sendMessage({
+          senderID: currentUserID,
+          receiverID: userID,
+          context: `data:image/jpeg;base64,${imageBase64}`,
+          messageTypeID: "type2",
+          messageID,
+        }).catch((error) => {
+          console.error("Lỗi đồng bộ API khi gửi ảnh:", error);
+        });
+      }
+    });
+  };
+
+  const handleSendVideo = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert(
+        "Quyền truy cập bị từ chối",
+        "Ứng dụng cần quyền truy cập thư viện để gửi video. Vui lòng cấp quyền trong cài đặt."
+      );
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      quality: 0.8,
+    });
+
+    if (result.canceled) {
+      console.log("User cancelled video picker");
+      return;
+    }
+
+    const videoUri = result.assets[0].uri;
+    if (!videoUri || !userID || !currentUserID || !socket) return;
+
+    // Kiểm tra định dạng video
+    if (!videoUri.match(/\.(mp4)$/i)) {
+      Alert.alert("Lỗi", "Chỉ hỗ trợ video định dạng .mp4.");
+      return;
+    }
+
+    // Chuyển video thành base64
+    let videoBase64;
+    try {
+      videoBase64 = await FileSystem.readAsStringAsync(videoUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    } catch (error) {
+      console.error("Lỗi khi chuyển video thành base64:", error);
+      Alert.alert("Lỗi", "Không thể gửi video. Vui lòng thử lại.");
+      return;
+    }
+
+    const messageID = `${socket.id}-${Date.now()}`;
+    const newMessage: Message = {
+      senderID: currentUserID,
+      receiverID: userID,
+      messageTypeID: "type3",
+      context: `data:video/mp4;base64,${videoBase64}`,
+      messageID,
+      createdAt: new Date().toISOString(),
+      seenStatus: [],
+    };
+
+    setMessages((prev) => [...prev, newMessage]);
+
+    socket.emit("sendTextMessage", newMessage, async (response: SocketResponse) => {
+      console.log("Server response for video:", response);
+      if (response !== "đã nhận") {
+        setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+      } else {
+        await sendMessage({
+          senderID: currentUserID,
+          receiverID: userID,
+          context: `data:video/mp4;base64,${videoBase64}`,
+          messageTypeID: "type3",
+          messageID,
+        }).catch((error) => {
+          console.error("Lỗi đồng bộ API khi gửi video:", error);
+        });
+      }
+    });
+  };
+
   useEffect(() => {
-    if (flatListRef.current) {
+    if (flatListRef.current && messages.length > 0) {
       flatListRef.current.scrollToEnd({ animated: true });
     }
-  }, [messages]);
+  }, [messages.length]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: Message }) => {
+      console.log(`Rendering message: type=${item.messageTypeID}, context=${item.context.substring(0, 50)}...`);
+      return <MessageItem item={item} currentUserID={currentUserID} userID={userID} />;
+    },
+    [currentUserID, userID]
+  );
 
   if (loading) {
     return (
@@ -216,32 +574,21 @@ export default function Chat() {
         ref={flatListRef}
         data={messages}
         keyExtractor={(item) => item.messageID || item.createdAt}
-        renderItem={({ item }) => (
-          <View
-            style={[
-              styles.messageContainer,
-              item.senderID === currentUserID ? styles.myMessage : styles.otherMessage,
-            ]}
-          >
-            {item.senderID !== currentUserID && (
-              <Image source={{ uri: "https://randomuser.me/api/portraits/men/1.jpg" }} style={styles.avatar} />
-            )}
-            <View style={styles.messageBox}>
-              {item.messageTypeID === "type1" && <Text style={styles.messageText}>{item.context}</Text>}
-              {item.senderID === currentUserID && (
-                <Text style={styles.seenText}>
-                  {item.seenStatus?.includes(userID!) ? "Đã xem" : "Đã gửi"}
-                </Text>
-              )}
-            </View>
-          </View>
-        )}
+        renderItem={renderItem}
         contentContainerStyle={{ padding: 10 }}
+        initialNumToRender={10}
+        windowSize={5}
       />
 
       <View style={styles.inputContainer}>
-        <TouchableOpacity>
+        <TouchableOpacity onPress={() => setShowStickerPicker(true)}>
           <Ionicons name="happy-outline" size={24} color="#666" />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={handleSendImage}>
+          <Ionicons name="image-outline" size={24} color="#666" style={{ marginLeft: 10 }} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={handleSendVideo}>
+          <Ionicons name="videocam-outline" size={24} color="#666" style={{ marginLeft: 10 }} />
         </TouchableOpacity>
         <TextInput
           style={styles.input}
@@ -253,6 +600,45 @@ export default function Chat() {
           <Ionicons name="send" size={24} color="#007AFF" />
         </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={showStickerPicker}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowStickerPicker(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.stickerPicker}>
+            <TextInput
+              style={styles.stickerSearchInput}
+              placeholder="Tìm kiếm sticker..."
+              value={stickerSearchTerm}
+              onChangeText={setStickerSearchTerm}
+            />
+            <FlatList
+              data={stickers}
+              keyExtractor={(item) => item.id}
+              numColumns={3}
+              renderItem={({ item }) => (
+                <Pressable onPress={() => handleSendSticker(item.images.original.url)}>
+                  <Image
+                    source={{ uri: item.images.original.url }}
+                    style={styles.stickerThumbnail}
+                    resizeMode="contain"
+                    onError={(e) => console.log("Error loading sticker thumbnail:", e.nativeEvent.error)}
+                  />
+                </Pressable>
+              )}
+            />
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => setShowStickerPicker(false)}
+            >
+              <Text style={styles.closeButtonText}>Đóng</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -279,6 +665,10 @@ const styles = StyleSheet.create({
   messageBox: { backgroundColor: "#fff", padding: 10, borderRadius: 10 },
   messageText: { fontSize: 16 },
   seenText: { fontSize: 12, color: "#666", textAlign: "right" },
+  sticker: { width: 100, height: 100, marginVertical: 5 },
+  image: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
+  videoContainer: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
+  video: { width: "100%", height: "100%", borderRadius: 10 },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -290,4 +680,32 @@ const styles = StyleSheet.create({
   },
   input: { flex: 1, fontSize: 16, marginHorizontal: 10 },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  modalContainer: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  stickerPicker: {
+    backgroundColor: "#fff",
+    height: "50%",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+  },
+  stickerSearchInput: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+  },
+  stickerThumbnail: { width: 80, height: 80, margin: 5 },
+  closeButton: {
+    backgroundColor: "#007AFF",
+    padding: 10,
+    borderRadius: 10,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  closeButtonText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
 });
