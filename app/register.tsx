@@ -1,101 +1,121 @@
+// Register.tsx
+import { useState } from "react";
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  FlatList,
   Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { useState } from "react";
-import { Ionicons } from "@expo/vector-icons"; // Import icon
-import { useSafeAreaInsets } from "react-native-safe-area-context"; // Hook đa nền tảng
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { registerUser } from "../services/register";
+import DateTimePicker from "@react-native-community/datetimepicker";
 
 export default function Register() {
   const router = useRouter();
   const [isTermsAccepted, setTermsAccepted] = useState(false);
   const [isSocialAccepted, setSocialAccepted] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [isDropdownVisible, setDropdownVisible] = useState(false);
-  const [selectedCountryCode, setSelectedCountryCode] = useState("+84");
-  const insets = useSafeAreaInsets(); // Lấy giá trị vùng an toàn (trên Android, insets.top thường là 0)
+  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
+  const [DOB, setDOB] = useState<Date | null>(null); // Lưu dưới dạng Date object
+  const insets = useSafeAreaInsets();
 
-  const countryCodes = ["+84", "+1", "+44", "+61", "+65"];
+  const handleRegister = async () => {
+    if (!isTermsAccepted || !isSocialAccepted) {
+      alert("Vui lòng đồng ý với các điều khoản!");
+      return;
+    }
+    if (!phoneNumber || !password || !username || !DOB) {
+      alert("Vui lòng nhập đầy đủ thông tin!");
+      return;
+    }
+
+    const formattedDOB = formatDateForAPI(DOB);
+    const userData = {
+      phoneNumber,
+      password,
+      username,
+      DOB: formattedDOB, // Gửi dạng 20/03/2025
+    };
+    console.log("User data before calling API:", userData);
+    const registeredUser = await registerUser(userData);
+    if (registeredUser) {
+      router.push("/login");
+    }
+  };
+
+  const onDateChange = (event: any, selectedDate?: Date) => {
+    const currentDate = selectedDate || DOB;
+    setDOB(currentDate);
+  };
+
+  const formatDateForAPI = (date: Date) => {
+    return date.toISOString().split('T')[0];// Định dạng 20/03/2025 để gửi API
+  };
 
   return (
-    <View style={[
-            styles.container,
-            {
-              // Trên iOS: paddingTop = insets.top để nằm sát dưới Dynamic Island
-              // Trên Android: paddingTop = 3 (giá trị mặc định, không bị ảnh hưởng bởi insets)
-              paddingTop: Platform.OS === "ios" ? insets.top : 3,
-              paddingBottom: 8, // Đảm bảo chiều cao navbar đủ lớn
-            },
-          ]}>
+    <View
+      style={[
+        styles.container,
+        { paddingTop: Platform.OS === "ios" ? insets.top : 3, paddingBottom: 8 },
+      ]}
+    >
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-        >
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
         <Text style={styles.sub}>Đăng ký</Text>
       </View>
 
-      <Text style={styles.title}>Nhập số điện thoại</Text>
+      <Text style={styles.title}>Đăng ký tài khoản</Text>
 
-      <View style={styles.phoneInputContainer}>
-        <TouchableOpacity
-          style={styles.countryCodeContainer}
-          onPress={() => setDropdownVisible(!isDropdownVisible)}
-        >
-          <Text style={styles.countryCode}>{selectedCountryCode}</Text>
-          <Ionicons
-            name={isDropdownVisible ? "chevron-up" : "chevron-down"}
-            size={16}
-            color="#666"
-          />
-        </TouchableOpacity>
-        <View style={styles.divider} />
-        <TextInput
-          style={styles.phoneNumber}
-          placeholder="Số điện thoại"
-          keyboardType="phone-pad"
-          value={phoneNumber}
-          onChangeText={setPhoneNumber}
-        />
-        {phoneNumber.length > 0 && (
-          <TouchableOpacity
-            onPress={() => setPhoneNumber("")}
-            style={styles.clearIcon}
-          >
-            <Ionicons name="close-circle" size={20} color="#ccc" />
-          </TouchableOpacity>
-        )}
-      </View>
+      {/* Phone Number */}
+      <TextInput
+        style={styles.input}
+        placeholder="Số điện thoại"
+        keyboardType="phone-pad"
+        value={phoneNumber}
+        onChangeText={setPhoneNumber}
+      />
 
-      {isDropdownVisible && (
-        <View style={styles.dropdown}>
-          <FlatList
-            data={countryCodes}
-            keyExtractor={(item) => item}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.dropdownItem}
-                onPress={() => {
-                  setSelectedCountryCode(item);
-                  setDropdownVisible(false);
-                }}
-              >
-                <Text style={styles.dropdownText}>{item}</Text>
-              </TouchableOpacity>
-            )}
+      {/* Password */}
+      <TextInput
+        style={styles.input}
+        placeholder="Mật khẩu"
+        secureTextEntry
+        value={password}
+        onChangeText={setPassword}
+      />
+
+      {/* Username */}
+      <TextInput
+        style={styles.input}
+        placeholder="Tên người dùng"
+        value={username}
+        onChangeText={setUsername}
+      />
+
+      {/* Date of Birth */}
+      <View style={styles.datePickerRow}>
+        <Text style={styles.dateLabel}>Chọn ngày sinh</Text>
+        <View style={styles.datePickerContainer}>
+          <DateTimePicker
+            value={DOB || new Date()}
+            mode="date"
+            display={Platform.OS === "ios" ? "default" : "calendar"}
+            onChange={onDateChange}
+            maximumDate={new Date()}
+            style={styles.datePicker}
           />
         </View>
-      )}
+      </View>
 
+      {/* Checkbox */}
       <View style={styles.checkboxContainer}>
         <TouchableOpacity
           onPress={() => setTermsAccepted(!isTermsAccepted)}
@@ -104,13 +124,10 @@ export default function Register() {
             isTermsAccepted && styles.checkboxChecked,
           ]}
         >
-          {isTermsAccepted && (
-            <Ionicons name="checkmark" size={18} color="white" />
-          )}
+          {isTermsAccepted && <Ionicons name="checkmark" size={18} color="white" />}
         </TouchableOpacity>
         <Text style={styles.checkboxLabel}>
-          Tôi đồng ý với các{" "}
-          <Text style={styles.link}>điều khoản sử dụng Zalo</Text>
+          Tôi đồng ý với các <Text style={styles.link}>điều khoản sử dụng Zalo</Text>
         </Text>
       </View>
 
@@ -122,48 +139,33 @@ export default function Register() {
             isSocialAccepted && styles.checkboxChecked,
           ]}
         >
-          {isSocialAccepted && (
-            <Ionicons name="checkmark" size={18} color="white" />
-          )}
+          {isSocialAccepted && <Ionicons name="checkmark" size={18} color="white" />}
         </TouchableOpacity>
         <Text style={styles.checkboxLabel}>
-          Tôi đồng ý với{" "}
-          <Text style={styles.link}>điều khoản Mạng xã hội của Zalo</Text>
+          Tôi đồng ý với <Text style={styles.link}>điều khoản Mạng xã hội của Zalo</Text>
         </Text>
       </View>
 
+      {/* Button */}
       <TouchableOpacity
         style={[
           styles.button,
-          isTermsAccepted && isSocialAccepted && phoneNumber
+          isTermsAccepted && isSocialAccepted && phoneNumber && password && username && DOB
             ? styles.buttonActive
             : styles.buttonDisabled,
         ]}
-        onPress={() => {
-          if (!isTermsAccepted || !isSocialAccepted) {
-            alert("Vui lòng đồng ý với các điều khoản!");
-            return;
-          }
-          if (!phoneNumber) {
-            alert("Vui lòng nhập số điện thoại!");
-            return;
-          }
-          router.push({
-            pathname: "/register_otp",
-            params: { phone: phoneNumber },
-          });
-        }}
-        disabled={!isTermsAccepted || !isSocialAccepted || !phoneNumber}
+        onPress={handleRegister}
+        disabled={!isTermsAccepted || !isSocialAccepted || !phoneNumber || !password || !username || !DOB}
       >
         <Text
           style={[
             styles.buttonText,
-            isTermsAccepted && isSocialAccepted && phoneNumber
+            isTermsAccepted && isSocialAccepted && phoneNumber && password && username && DOB
               ? styles.buttonTextActive
               : styles.buttonTextDisabled,
           ]}
         >
-          Tiếp tục
+          Đăng ký
         </Text>
       </TouchableOpacity>
 
@@ -206,54 +208,33 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     textAlign: "center",
   },
-  phoneInputContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 2,
+  input: {
+    borderWidth: 1,
     borderColor: "#007AFF",
     borderRadius: 8,
+    height: 40,
     paddingHorizontal: 10,
-    paddingVertical: 7,
+    fontSize: 16,
     marginBottom: 10,
+    backgroundColor: "#fff",
   },
-  countryCodeContainer: {
+  datePickerRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingRight: 10,
+    marginBottom: 10,
   },
-  countryCode: {
+  dateLabel: {
     fontSize: 16,
+    color: "#007AFF", // Màu xám giống placeholder của TextInput
+    marginRight: 10,
+    width: 120, // Cố định chiều rộng để căn chỉnh
     fontWeight: "bold",
-    color: "#000",
   },
-  divider: {
-    width: 1.5,
-    height: "100%",
-    backgroundColor: "#ccc",
-    marginHorizontal: 10,
-  },
-  phoneNumber: {
+  datePickerContainer: {
     flex: 1,
-    fontSize: 16,
   },
-  clearIcon: {
-    marginLeft: 10,
-  },
-  dropdown: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    marginTop: 5,
-    paddingVertical: 5,
-  },
-  dropdownItem: {
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-  },
-  dropdownText: {
-    fontSize: 16,
-    color: "#000",
+  datePicker: {
+    width: "100%",
   },
   checkboxContainer: {
     flexDirection: "row",

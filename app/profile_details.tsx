@@ -1,9 +1,22 @@
+// ProfileDetails.tsx
 import { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image, TextInput, ActivityIndicator, Alert } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  TextInput,
+  ActivityIndicator,
+  Alert,
+  Platform,
+} from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { getCurrentUser } from "../services/auth";
 import { updateProfile } from "../services/profile";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import DateTimePicker from "@react-native-community/datetimepicker";
 
 // Định nghĩa interface User khớp với dữ liệu từ API
 interface User {
@@ -18,10 +31,34 @@ export default function ProfileDetails() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isEditing, setIsEditing] = useState<boolean>(false);
-
-  // State để chỉnh sửa
   const [username, setUsername] = useState<string>("");
-  const [dob, setDob] = useState<string>(""); // Định dạng hiển thị: DD/MM/YYYY
+  const [dob, setDob] = useState<Date>(new Date()); // Khởi tạo mặc định là ngày hiện tại
+  const [displayDob, setDisplayDob] = useState<string>(""); // Định dạng hiển thị: DD/MM/YYYY
+  const insets = useSafeAreaInsets();
+
+  // Hàm chuyển định dạng từ yyyy-mm-dd sang dd/mm/yyyy
+  const formatDateForDisplay = (dateString: string): string => {
+    try {
+      // Giả sử dateString là yyyy-mm-dd
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return "Chưa cập nhật"; // Nếu không parse được, trả về giá trị mặc định
+      }
+      return date.toLocaleDateString("vi-VN", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      }); // Trả về dd/mm/yyyy, ví dụ: 18/10/2003
+    } catch (error) {
+      console.error("Error parsing date:", error);
+      return "Chưa cập nhật";
+    }
+  };
+
+  // Hàm chuyển định dạng từ Date object sang yyyy-mm-dd
+  const formatDateToApi = (date: Date): string => {
+    return date.toISOString().split("T")[0]; // Trả về yyyy-mm-dd, ví dụ: 2003-10-18
+  };
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -31,10 +68,19 @@ export default function ProfileDetails() {
       } else {
         setUser(userData);
         setUsername(userData.username);
-        // Chuyển định dạng DOB từ YYYY-MM-DD sang DD/MM/YYYY để hiển thị
-        if (userData.DOB) {
-          const [year, month, day] = userData.DOB.split("-");
-          setDob(`${day}/${month}/${year}`);
+        // Chuyển định dạng DOB để hiển thị
+        setDisplayDob(formatDateForDisplay(userData.DOB));
+        // Chuyển DOB thành Date object để dùng trong DateTimePicker
+        try {
+          const date = new Date(userData.DOB);
+          if (!isNaN(date.getTime())) {
+            setDob(date);
+          } else {
+            setDob(new Date()); // Nếu không parse được, dùng ngày hiện tại
+          }
+        } catch (error) {
+          console.error("Error parsing DOB for DateTimePicker:", error);
+          setDob(new Date()); // Giá trị mặc định nếu lỗi
         }
       }
       setLoading(false);
@@ -42,28 +88,6 @@ export default function ProfileDetails() {
 
     fetchUser();
   }, []);
-
-  // Hàm chuyển định dạng ngày từ DD/MM/YYYY sang YYYY-MM-DD
-  const formatDateToApi = (date: string): string => {
-    const [day, month, year] = date.split("/");
-    return `${year}-${month}-${day}`;
-  };
-
-  // Hàm kiểm tra định dạng ngày DD/MM/YYYY
-  const isValidDateFormat = (date: string): boolean => {
-    const regex = /^\d{2}\/\d{2}\/\d{4}$/;
-    if (!regex.test(date)) return false;
-
-    const [day, month, year] = date.split("/").map(Number);
-    const dateObj = new Date(year, month - 1, day);
-    return (
-      dateObj.getDate() === day &&
-      dateObj.getMonth() + 1 === month &&
-      dateObj.getFullYear() === year &&
-      year >= 1900 &&
-      year <= new Date().getFullYear()
-    );
-  };
 
   // Xử lý cập nhật thông tin
   const handleSave = async () => {
@@ -80,32 +104,27 @@ export default function ProfileDetails() {
       return;
     }
 
-    if (!isValidDateFormat(dob)) {
-      Alert.alert("Lỗi", "Ngày sinh không hợp lệ. Vui lòng nhập theo định dạng DD/MM/YYYY.");
-      return;
-    }
-
     try {
-      // Chuyển định dạng DOB sang YYYY-MM-DD trước khi gửi
       const formattedDob = formatDateToApi(dob);
       const updatedUser = await updateProfile(user._id, username, formattedDob);
       
-      // Cập nhật state user
       setUser({
         ...user,
         username: updatedUser.username,
         DOB: updatedUser.DOB,
       });
       
-      // Cập nhật lại giá trị hiển thị của DOB
-      const [year, month, day] = updatedUser.DOB.split("-");
-      setDob(`${day}/${month}/${year}`);
-
+      setDisplayDob(formatDateForDisplay(updatedUser.DOB));
       setIsEditing(false);
       Alert.alert("Thành công", "Thông tin cá nhân đã được cập nhật.");
     } catch (error: any) {
       Alert.alert("Lỗi", error.message || "Không thể cập nhật thông tin.");
     }
+  };
+
+  const onDateChange = (event: any, selectedDate?: Date) => {
+    const currentDate = selectedDate || dob;
+    setDob(currentDate);
   };
 
   if (loading) {
@@ -117,7 +136,15 @@ export default function ProfileDetails() {
   }
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        {
+          paddingTop: Platform.OS === "ios" ? insets.top : 3,
+          paddingBottom: 8,
+        },
+      ]}
+    >
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
@@ -151,18 +178,19 @@ export default function ProfileDetails() {
           <Ionicons name="calendar" size={22} color="#007AFF" />
           <Text style={styles.label}>Ngày sinh</Text>
           {isEditing ? (
-            <TextInput
-              style={styles.input}
+            <DateTimePicker
               value={dob}
-              onChangeText={setDob}
-              placeholder="DD/MM/YYYY"
+              mode="date"
+              display={Platform.OS === "ios" ? "default" : "calendar"}
+              onChange={onDateChange}
+              maximumDate={new Date()}
+              style={styles.datePicker}
             />
           ) : (
-            <Text style={styles.value}>{dob || "Chưa cập nhật"}</Text>
+            <Text style={styles.value}>{displayDob || "Chưa cập nhật"}</Text>
           )}
         </View>
 
-        {/* Số điện thoại (Không chỉnh sửa) */}
         <View style={styles.infoItem}>
           <Ionicons name="call" size={22} color="#007AFF" />
           <Text style={styles.label}>Số điện thoại</Text>
@@ -236,6 +264,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#007AFF",
     paddingBottom: 5,
+  },
+  datePicker: {
+    flex: 1,
   },
   editButton: {
     backgroundColor: "#007AFF",
