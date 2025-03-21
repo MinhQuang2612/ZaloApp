@@ -37,20 +37,9 @@ export default function Home() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const router = useRouter();
 
-  // Hàm xác định loại tin nhắn dựa trên context
+  // Hàm xác định loại tin nhắn dựa trên messageTypeID
   const determineMessageType = (message: HomeMessage): string => {
-    const { context, messageTypeID } = message;
-
-    if (context.startsWith("https://media") && context.includes("giphy.com")) {
-      return "type4";
-    }
-    if (context.startsWith("data:image/")) {
-      return "type2";
-    }
-    if (context.match(/\.(mp4|mov|avi)$/i)) {
-      return "type3";
-    }
-    return messageTypeID || "type1";
+    return message.messageTypeID || "type1"; // Dựa vào messageTypeID từ API
   };
 
   // Hàm trả về nội dung hiển thị trong trang Home
@@ -68,6 +57,8 @@ export default function Home() {
         return "Đã gửi video";
       case "type4":
         return "Đã gửi sticker";
+      case "type5":
+        return "Đã gửi file";
       default:
         return "Tin nhắn không xác định";
     }
@@ -134,11 +125,10 @@ export default function Home() {
       await loadMessages();
 
       if (!currentUserID) {
-        //console.error("currentUserID không hợp lệ:", currentUserID);
         return;
       }
 
-      const newSocket = io("http://172.20.34.14:3000");
+      const newSocket = io("http://192.168.0.1:3000");
       setSocket(newSocket);
 
       newSocket.emit("joinUserRoom", currentUserID);

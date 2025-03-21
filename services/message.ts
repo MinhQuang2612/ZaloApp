@@ -48,3 +48,19 @@ export const sendMessage = async (message: {
     throw error;
   }
 };
+
+export const sendFileMessage = async (formData: FormData) => {
+  try {
+    console.log("Sending FormData to API:", formData);
+    const response = await api.post("/api/message/upload", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    console.log("API response:", response.data);
+    return response.data;
+  } catch (error: any) {
+    console.error("Lỗi khi gửi file qua API:", error.message, error.response?.data);
+    throw error;
+  }
+};

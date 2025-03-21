@@ -3,9 +3,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 
-// Tạo instance axios
 const api = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 30000, // Timeout 30 giây (30000ms)
   headers: {
     "Content-Type": "application/json",
   },
@@ -16,7 +16,7 @@ api.interceptors.request.use(
   async (config) => {
     const token = await AsyncStorage.getItem("userToken");
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`; 
+      config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
