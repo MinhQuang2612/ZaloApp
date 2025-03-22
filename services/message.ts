@@ -10,6 +10,10 @@ export interface Message {
   groupID?: string;
   messageID?: string;
   seenStatus?: string[];
+  file?: {
+    name: string;
+    data: string; // Base64 string
+  };
 }
 
 export const fetchMessages = async (receiverID: string): Promise<Message[]> => {
@@ -36,6 +40,7 @@ export const sendMessage = async (message: {
   messageTypeID: string;
   groupID?: string;
   messageID?: string;
+  file?: { name: string; data: string };
 }) => {
   try {
     const response = await api.post("/api/message", {

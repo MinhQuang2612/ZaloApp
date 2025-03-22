@@ -12,7 +12,7 @@ import {
   Alert,
   Image,
   Platform,
-   // Thêm import Image
+  Linking,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -21,10 +21,11 @@ import { fetchMessages, sendMessage, Message } from "../services/message";
 import { fetchUserByID } from "../services/contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
-import * as ImageManipulator from "expo-image-manipulator";
+import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import { Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
 // Định nghĩa kiểu cho response từ socket
 type SocketResponse =
   | "đang gửi"
@@ -61,26 +62,17 @@ const MessageItem = ({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (effectiveType === "type3") {
-      if (item.context.startsWith("data:video/")) {
-        const base64Data = item.context.split(",")[1];
-        const filePath = `${FileSystem.cacheDirectory}video-${item.messageID}.mp4`;
-
-        FileSystem.writeAsStringAsync(filePath, base64Data, {
-          encoding: FileSystem.EncodingType.Base64,
-        })
-          .then(() => {
-            setVideoUri(filePath);
-          })
-          .catch((err) => {
-            console.error("Lỗi khi tạo file video tạm thời:", err);
-            setError("Không thể tải video");
-          });
-      } else {
-        setVideoUri(item.context);
-      }
+    if (effectiveType === "type3" && item.context !== "Đang tải...") {
+      setVideoUri(item.context);
     }
   }, [item.context, effectiveType]);
+
+  const handleFilePress = (url: string) => {
+    Linking.openURL(url).catch((err) => {
+      console.error("Lỗi khi mở file:", err);
+      Alert.alert("Lỗi", "Không thể mở file. Vui lòng thử lại.");
+    });
+  };
 
   return (
     <View
@@ -97,14 +89,18 @@ const MessageItem = ({
         />
       )}
       <View style={styles.messageBox}>
-        {effectiveType === "type1" && <Text style={styles.messageText}>{item.context}</Text>}
+        {effectiveType === "type1" && <Text style={styles.messageText}>{item.context || "Tin nhắn trống"}</Text>}
         {effectiveType === "type2" && (
-          <Image
-            source={{ uri: item.context }}
-            style={styles.image}
-            resizeMode="cover"
-            onError={(e) => console.log("Error loading image:", e.nativeEvent.error)}
-          />
+          item.context === "Đang tải..." ? (
+            <Text style={styles.loadingText}>Đang tải...</Text>
+          ) : (
+            <Image
+              source={{ uri: item.context || "https://via.placeholder.com/200" }}
+              style={styles.image}
+              resizeMode="cover"
+              onError={(e) => console.log("Error loading image:", e.nativeEvent.error)}
+            />
+          )
         )}
         {effectiveType === "type3" && (
           <View style={styles.videoContainer}>
@@ -115,7 +111,8 @@ const MessageItem = ({
                 source={{ uri: videoUri }}
                 style={styles.video}
                 useNativeControls
-                onError={(e) => {
+                resizeMode="contain"
+                onError={(e: any) => {
                   console.log("Error loading video:", e);
                   setError("Không thể phát video");
                 }}
@@ -128,11 +125,25 @@ const MessageItem = ({
         )}
         {effectiveType === "type4" && (
           <Image
-            source={{ uri: item.context }}
+            source={{ uri: item.context || "https://via.placeholder.com/100" }}
             style={styles.sticker}
             resizeMode="contain"
             onError={(e) => console.log("Error loading sticker:", e.nativeEvent.error)}
           />
+        )}
+        {effectiveType === "type5" && (
+          item.context === "Đang tải..." ? (
+            <Text style={styles.loadingText}>Đang tải...</Text>
+          ) : (
+            <TouchableOpacity onPress={() => handleFilePress(item.context || "")}>
+              <View style={styles.fileContainer}>
+                <Ionicons name="document-outline" size={24} color="#007AFF" />
+                <Text style={styles.fileText}>
+                  File: {(item.context || "file").split("/").pop() || "Không xác định"}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )
         )}
         {item.senderID === currentUserID && (
           <Text style={styles.seenText}>
@@ -146,21 +157,7 @@ const MessageItem = ({
 
 // Hàm xác định loại tin nhắn
 const determineMessageType = (message: Message): string => {
-  const { context, messageTypeID } = message;
-
-  if (context.startsWith("https://media") && context.includes("giphy.com")) {
-    return "type4";
-  }
-  if (context.startsWith("data:image/")) {
-    return "type2";
-  }
-  if (context.startsWith("data:video/")) {
-    return "type3";
-  }
-  if (context.match(/\.(mp4|mov|avi)$/i)) {
-    return "type3";
-  }
-  return messageTypeID;
+  return message.messageTypeID || "type1";
 };
 
 export default function Chat() {
@@ -175,15 +172,12 @@ export default function Chat() {
   const [markedAsSeen, setMarkedAsSeen] = useState<Set<string>>(new Set());
   const flatListRef = useRef<FlatList>(null);
 
-  // State cho sticker picker
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [stickers, setStickers] = useState<GiphySticker[]>([]);
   const [stickerSearchTerm, setStickerSearchTerm] = useState("funny");
   const insets = useSafeAreaInsets();
-  // Giphy API Key
   const GIPHY_API_KEY = "ahUloRbYoMUhR2aBUDO2iyNObLH8dnMa";
 
-  // Fetch stickers từ Giphy API
   const fetchStickers = async (term: string) => {
     try {
       const BASE_URL = "http://api.giphy.com/v1/stickers/search";
@@ -200,6 +194,15 @@ export default function Chat() {
       fetchStickers(stickerSearchTerm);
     }
   }, [stickerSearchTerm, showStickerPicker]);
+
+  // Hàm chuyển filePath thành URL công khai
+  const convertFilePathToURL = (context: string): string => {
+    if (context && context.startsWith("D:\\CNM\\uploads")) {
+      const fileName = context.split("\\").pop();
+      return `http://192.168.2.158:3000/uploads/${fileName}`;
+    }
+    return context;
+  };
 
   useEffect(() => {
     const initializeSocketAndData = async () => {
@@ -237,8 +240,19 @@ export default function Chat() {
 
       try {
         const data = await fetchMessages(userID);
-        console.log("Messages loaded:", data);
-        setMessages(data);
+        // Chuyển filePath thành URL công khai
+        const updatedData = data.map((message) => {
+          if (
+            message.messageTypeID === "type2" ||
+            message.messageTypeID === "type3" ||
+            message.messageTypeID === "type5"
+          ) {
+            message.context = convertFilePathToURL(message.context);
+          }
+          return message;
+        });
+        console.log("Messages loaded:", updatedData);
+        setMessages(updatedData);
       } catch (error) {
         console.error("Lỗi khi lấy tin nhắn:", error);
       }
@@ -250,19 +264,40 @@ export default function Chat() {
         return;
       }
 
-      const newSocket = io("http://172.20.34.14:3000");
+      const newSocket = io("http://192.168.2.158:3000");
       setSocket(newSocket);
 
       newSocket.emit("joinUserRoom", userIDValue);
 
-      newSocket.on("receiveTextMessage", (message: Message) => {
+      newSocket.on("receiveMessage", (message: Message) => {
         console.log("Chat.tsx: Received new message via socket:", message);
         if (
-          (message.senderID === userID && message.receiverID === userIDValue) ||
-          (message.senderID === userIDValue && message.receiverID === userID)
+          (message.senderID === userID && message.receiverID === currentUserID) ||
+          (message.senderID === currentUserID && message.receiverID === userID)
         ) {
           setMessages((prev) => {
-            if (prev.some((msg) => msg.messageID === message.messageID)) return prev;
+            const existingMessageIndex = prev.findIndex((msg) => msg.messageID === message.messageID);
+            if (existingMessageIndex !== -1) {
+              const updatedMessages = [...prev];
+              // Chuyển filePath thành URL công khai
+              if (
+                message.messageTypeID === "type2" ||
+                message.messageTypeID === "type3" ||
+                message.messageTypeID === "type5"
+              ) {
+                message.context = convertFilePathToURL(message.context);
+              }
+              updatedMessages[existingMessageIndex] = message;
+              return updatedMessages;
+            }
+            // Chuyển filePath thành URL công khai
+            if (
+              message.messageTypeID === "type2" ||
+              message.messageTypeID === "type3" ||
+              message.messageTypeID === "type5"
+            ) {
+              message.context = convertFilePathToURL(message.context);
+            }
             const updatedMessages = [...prev, message];
             console.log("Chat.tsx: Updated messages:", updatedMessages);
             return updatedMessages;
@@ -275,7 +310,7 @@ export default function Chat() {
         setMessages((prev) =>
           prev.map((msg) =>
             msg.messageID === messageID
-              ? { ...msg, seenStatus: [...(msg.seenStatus || []), userID!] }
+              ? { ...msg, seenStatus: [...(msg.seenStatus || []), userID!], unread: false }
               : msg
           )
         );
@@ -284,7 +319,17 @@ export default function Chat() {
 
       newSocket.on("reloadMessage", async () => {
         const data = await fetchMessages(userID);
-        setMessages(data);
+        const updatedData = data.map((message) => {
+          if (
+            message.messageTypeID === "type2" ||
+            message.messageTypeID === "type3" ||
+            message.messageTypeID === "type5"
+          ) {
+            message.context = convertFilePathToURL(message.context);
+          }
+          return message;
+        });
+        setMessages(updatedData);
       });
 
       setLoading(false);
@@ -303,21 +348,21 @@ export default function Chat() {
         (msg) =>
           msg.receiverID === currentUserID &&
           !msg.seenStatus?.includes(currentUserID) &&
-          !markedAsSeen.has(msg.messageID!)
+          !markedAsSeen.has(msg.messageID || "")
       );
       console.log("Unread messages to mark as seen:", unreadMessages);
       unreadMessages.forEach((msg) => {
         socket.emit("seenMessage", msg.messageID, currentUserID, (response: SocketResponse) => {
           console.log("Seen response:", response);
           if (response === "Đã cập nhật seenStatus chat đơn") {
-            setMarkedAsSeen((prev) => new Set(prev).add(msg.messageID!));
+            setMarkedAsSeen((prev) => new Set(prev).add(msg.messageID || ""));
           }
         });
       });
     }
   }, [messages, currentUserID, socket]);
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!inputText.trim() || !userID || !currentUserID || !socket) return;
 
     const messageID = `${socket.id}-${Date.now()}`;
@@ -338,25 +383,16 @@ export default function Chat() {
     });
     setInputText("");
 
-    socket.emit("sendTextMessage", newMessage, async (response: SocketResponse) => {
+    socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
       console.log("Server response:", response);
-      if (response !== "đã nhận") {
+      if (response !== "Đã nhận") {
         setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-      } else {
-        await sendMessage({
-          senderID: currentUserID,
-          receiverID: userID,
-          context: inputText,
-          messageTypeID: "type1",
-          messageID,
-        }).catch((error) => {
-          console.error("Lỗi đồng bộ API:", error);
-        });
+        Alert.alert("Lỗi", "Không thể gửi tin nhắn. Vui lòng thử lại.");
       }
     });
   };
 
-  const handleSendSticker = (stickerUrl: string) => {
+  const handleSendSticker = async (stickerUrl: string) => {
     if (!stickerUrl.startsWith("https://")) {
       Alert.alert("Lỗi", "Sticker URL không hợp lệ.");
       return;
@@ -377,22 +413,21 @@ export default function Chat() {
     setMessages((prev) => [...prev, newMessage]);
     setShowStickerPicker(false);
 
-    socket.emit("sendTextMessage", newMessage, async (response: SocketResponse) => {
+    socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
       console.log("Server response for sticker:", response);
-      if (response !== "đã nhận") {
+      if (response !== "Đã nhận") {
         setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-      } else {
-        await sendMessage({
-          senderID: currentUserID,
-          receiverID: userID,
-          context: stickerUrl,
-          messageTypeID: "type4",
-          messageID,
-        }).catch((error) => {
-          console.error("Lỗi đồng bộ API khi gửi sticker:", error);
-        });
+        Alert.alert("Lỗi", "Không thể gửi sticker. Vui lòng thử lại.");
       }
     });
+  };
+
+  // Hàm chuyển file thành Base64
+  const convertFileToBase64 = async (uri: string): Promise<string> => {
+    const fileData = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return fileData;
   };
 
   const handleSendImage = async () => {
@@ -415,51 +450,68 @@ export default function Chat() {
       return;
     }
 
-    const imageUri = result.assets[0].uri;
-    if (!imageUri || !userID || !currentUserID || !socket) return;
+    const file = result.assets[0];
+    if (!file) {
+      console.log("No image selected");
+      return;
+    }
 
-    // Nén ảnh trước khi chuyển thành base64
-    const manipulatedImage = await ImageManipulator.manipulateAsync(
-      imageUri,
-      [{ resize: { width: 300 } }],
-      { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG, base64: true }
-    );
+    const fileUri = file.uri;
+    if (!fileUri || !userID || !currentUserID || !socket) {
+      console.log("Missing required data:", { fileUri, userID, currentUserID, socket });
+      return;
+    }
 
-    const imageBase64 = manipulatedImage.base64;
-    if (!imageBase64) {
-      Alert.alert("Lỗi", "Không thể nén ảnh. Vui lòng thử lại.");
+    const fileInfo = await FileSystem.getInfoAsync(fileUri);
+    if (!fileInfo.exists) {
+      console.log("Image file does not exist:", fileUri);
+      Alert.alert("Lỗi", "File ảnh không tồn tại. Vui lòng thử lại.");
       return;
     }
 
     const messageID = `${socket.id}-${Date.now()}`;
-    const newMessage: Message = {
+    const tempMessage: Message = {
       senderID: currentUserID,
       receiverID: userID,
       messageTypeID: "type2",
-      context: `data:image/jpeg;base64,${imageBase64}`,
+      context: "Đang tải...",
       messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
     };
 
-    setMessages((prev) => [...prev, newMessage]);
+    setMessages((prev) => [...prev, tempMessage]);
 
-    socket.emit("sendTextMessage", newMessage, async (response: SocketResponse) => {
-      console.log("Server response for image:", response);
-      if (response !== "đã nhận") {
-        setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-      } else {
-        await sendMessage({
-          senderID: currentUserID,
-          receiverID: userID,
-          context: `data:image/jpeg;base64,${imageBase64}`,
-          messageTypeID: "type2",
-          messageID,
-        }).catch((error) => {
-          console.error("Lỗi đồng bộ API khi gửi ảnh:", error);
-        });
-      }
-    });
+    try {
+      // Chuyển file thành Base64
+      const fileBase64 = await convertFileToBase64(fileUri);
+
+      const newMessage: Message = {
+        senderID: currentUserID,
+        receiverID: userID,
+        messageTypeID: "type2",
+        context: "", // Context sẽ được backend cập nhật thành filePath
+        messageID,
+        createdAt: new Date().toISOString(),
+        seenStatus: [],
+        file: {
+          name: `image-${Date.now()}.jpg`,
+          data: fileBase64,
+        },
+      };
+
+      socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
+        console.log("Server response for image:", response);
+        if (response !== "Đã nhận") {
+          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+          Alert.alert("Lỗi", "Không thể gửi ảnh. Vui lòng thử lại.");
+        }
+      });
+    } catch (error) {
+      console.error("Lỗi khi gửi ảnh:", error);
+      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+      Alert.alert("Lỗi", "Không thể gửi ảnh. Vui lòng thử lại.");
+    }
   };
 
   const handleSendVideo = async () => {
@@ -482,56 +534,151 @@ export default function Chat() {
       return;
     }
 
-    const videoUri = result.assets[0].uri;
-    if (!videoUri || !userID || !currentUserID || !socket) return;
-
-    // Kiểm tra định dạng video
-    if (!videoUri.match(/\.(mp4)$/i)) {
-      Alert.alert("Lỗi", "Chỉ hỗ trợ video định dạng .mp4.");
+    const file = result.assets[0];
+    if (!file) {
+      console.log("No video selected");
       return;
     }
 
-    // Chuyển video thành base64
-    let videoBase64;
-    try {
-      videoBase64 = await FileSystem.readAsStringAsync(videoUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-    } catch (error) {
-      console.error("Lỗi khi chuyển video thành base64:", error);
-      Alert.alert("Lỗi", "Không thể gửi video. Vui lòng thử lại.");
+    const fileUri = file.uri;
+    if (!fileUri || !userID || !currentUserID || !socket) {
+      console.log("Missing required data:", { fileUri, userID, currentUserID, socket });
+      return;
+    }
+
+    if (!fileUri.match(/\.(mp4|mov|avi)$/i)) {
+      Alert.alert("Lỗi", "Chỉ hỗ trợ video định dạng .mp4, .mov, hoặc .avi.");
+      return;
+    }
+
+    const fileInfo = await FileSystem.getInfoAsync(fileUri);
+    if (!fileInfo.exists) {
+      console.log("Video file does not exist:", fileUri);
+      Alert.alert("Lỗi", "File video không tồn tại. Vui lòng thử lại.");
       return;
     }
 
     const messageID = `${socket.id}-${Date.now()}`;
-    const newMessage: Message = {
+    const tempMessage: Message = {
       senderID: currentUserID,
       receiverID: userID,
       messageTypeID: "type3",
-      context: `data:video/mp4;base64,${videoBase64}`,
+      context: "Đang tải...",
       messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
     };
 
-    setMessages((prev) => [...prev, newMessage]);
+    setMessages((prev) => [...prev, tempMessage]);
 
-    socket.emit("sendTextMessage", newMessage, async (response: SocketResponse) => {
-      console.log("Server response for video:", response);
-      if (response !== "đã nhận") {
-        setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-      } else {
-        await sendMessage({
-          senderID: currentUserID,
-          receiverID: userID,
-          context: `data:video/mp4;base64,${videoBase64}`,
-          messageTypeID: "type3",
-          messageID,
-        }).catch((error) => {
-          console.error("Lỗi đồng bộ API khi gửi video:", error);
-        });
-      }
+    try {
+      // Chuyển file thành Base64
+      const fileBase64 = await convertFileToBase64(fileUri);
+
+      const newMessage: Message = {
+        senderID: currentUserID,
+        receiverID: userID,
+        messageTypeID: "type3",
+        context: "", // Context sẽ được backend cập nhật thành filePath
+        messageID,
+        createdAt: new Date().toISOString(),
+        seenStatus: [],
+        file: {
+          name: `video-${Date.now()}.mp4`,
+          data: fileBase64,
+        },
+      };
+
+      socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
+        console.log("Server response for video:", response);
+        if (response !== "Đã nhận") {
+          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+          Alert.alert("Lỗi", "Không thể gửi video. Vui lòng thử lại.");
+        }
+      });
+    } catch (error) {
+      console.error("Lỗi khi gửi video:", error);
+      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+      Alert.alert("Lỗi", "Không thể gửi video. Vui lòng thử lại.");
+    }
+  };
+
+  const handleSendFile = async () => {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: "*/*",
+      copyToCacheDirectory: true,
     });
+
+    console.log("DocumentPicker result:", result);
+
+    if (result.canceled) {
+      console.log("User cancelled file picker");
+      return;
+    }
+
+    const file = result.assets[0];
+    if (!file) {
+      console.log("No file selected");
+      return;
+    }
+
+    const fileUri = file.uri;
+    const fileName = file.name;
+    if (!fileUri || !userID || !currentUserID || !socket) {
+      console.log("Missing required data:", { fileUri, userID, currentUserID, socket });
+      return;
+    }
+
+    const fileInfo = await FileSystem.getInfoAsync(fileUri);
+    if (!fileInfo.exists) {
+      console.log("File does not exist:", fileUri);
+      Alert.alert("Lỗi", "File không tồn tại. Vui lòng thử lại.");
+      return;
+    }
+
+    const messageID = `${socket.id}-${Date.now()}`;
+    const tempMessage: Message = {
+      senderID: currentUserID,
+      receiverID: userID,
+      messageTypeID: "type5",
+      context: "Đang tải...",
+      messageID,
+      createdAt: new Date().toISOString(),
+      seenStatus: [],
+    };
+
+    setMessages((prev) => [...prev, tempMessage]);
+
+    try {
+      // Chuyển file thành Base64
+      const fileBase64 = await convertFileToBase64(fileUri);
+
+      const newMessage: Message = {
+        senderID: currentUserID,
+        receiverID: userID,
+        messageTypeID: "type5",
+        context: "", // Context sẽ được backend cập nhật thành filePath
+        messageID,
+        createdAt: new Date().toISOString(),
+        seenStatus: [],
+        file: {
+          name: fileName,
+          data: fileBase64,
+        },
+      };
+
+      socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
+        console.log("Server response for file:", response);
+        if (response !== "Đã nhận") {
+          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+          Alert.alert("Lỗi", "Không thể gửi file. Vui lòng thử lại.");
+        }
+      });
+    } catch (error) {
+      console.error("Lỗi khi gửi file:", error);
+      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+      Alert.alert("Lỗi", "Không thể gửi file. Vui lòng thử lại.");
+    }
   };
 
   useEffect(() => {
@@ -541,8 +688,9 @@ export default function Chat() {
   }, [messages.length]);
 
   const renderItem = useCallback(
-    ({ item }: { item: Message }) => {
-      console.log(`Rendering message: type=${item.messageTypeID}, context=${item.context.substring(0, 50)}...`);
+    ({ item, index }: { item: Message; index: number }) => {
+      const contextPreview = item.context ? item.context.substring(0, 50) : "Tin nhắn trống";
+      console.log(`Rendering message: type=${item.messageTypeID}, context=${contextPreview}...`);
       return <MessageItem item={item} currentUserID={currentUserID} userID={userID} />;
     },
     [currentUserID, userID]
@@ -559,11 +707,9 @@ export default function Chat() {
   return (
     <View style={styles.container}>
       <View style={[styles.navbar, {
-              // Trên iOS: paddingTop = insets.top để nằm sát dưới Dynamic Island
-              // Trên Android: paddingTop = 3 (giá trị mặc định, không bị ảnh hưởng bởi insets)
-              paddingTop: Platform.OS === "ios" ? insets.top : 3,
-              paddingBottom: 8, // Đảm bảo chiều cao navbar đủ lớn
-            },]}>
+        paddingTop: Platform.OS === "ios" ? insets.top : 3,
+        paddingBottom: 8,
+      }]}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -579,7 +725,7 @@ export default function Chat() {
       <FlatList
         ref={flatListRef}
         data={messages}
-        keyExtractor={(item) => item.messageID || item.createdAt}
+        keyExtractor={(item, index) => item.messageID || item.createdAt || `message-${index}`}
         renderItem={renderItem}
         contentContainerStyle={{ padding: 10 }}
         initialNumToRender={10}
@@ -595,6 +741,9 @@ export default function Chat() {
         </TouchableOpacity>
         <TouchableOpacity onPress={handleSendVideo}>
           <Ionicons name="videocam-outline" size={24} color="#666" style={{ marginLeft: 10 }} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={handleSendFile}>
+          <Ionicons name="document-outline" size={24} color="#666" style={{ marginLeft: 10 }} />
         </TouchableOpacity>
         <TextInput
           style={styles.input}
@@ -657,7 +806,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#007AFF",
     paddingVertical: 15,
     paddingHorizontal: 15,
-    
   },
   username: { flex: 1, color: "#fff", fontSize: 18, fontWeight: "bold", marginLeft: 10 },
   messageContainer: {
@@ -671,11 +819,14 @@ const styles = StyleSheet.create({
   avatar: { width: 40, height: 40, borderRadius: 20, marginRight: 10 },
   messageBox: { backgroundColor: "#fff", padding: 10, borderRadius: 10 },
   messageText: { fontSize: 16 },
+  loadingText: { fontSize: 16, color: "#666", fontStyle: "italic" },
   seenText: { fontSize: 12, color: "#666", textAlign: "right" },
   sticker: { width: 100, height: 100, marginVertical: 5 },
   image: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
   videoContainer: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
-  video: { width: "100%", height: "100%", borderRadius: 10, resizeMode: "cover" },
+  video: { width: "100%", height: "100%", borderRadius: 10 },
+  fileContainer: { flexDirection: "row", alignItems: "center", marginVertical: 5 },
+  fileText: { fontSize: 16, color: "#007AFF", marginLeft: 10 },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
