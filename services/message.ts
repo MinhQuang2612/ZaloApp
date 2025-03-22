@@ -10,6 +10,10 @@ export interface Message {
   groupID?: string;
   messageID?: string;
   seenStatus?: string[];
+  file?: {
+    name: string;
+    data: string; // Base64 string
+  };
 }
 
 export const fetchMessages = async (receiverID: string): Promise<Message[]> => {
@@ -36,6 +40,7 @@ export const sendMessage = async (message: {
   messageTypeID: string;
   groupID?: string;
   messageID?: string;
+  file?: { name: string; data: string };
 }) => {
   try {
     const response = await api.post("/api/message", {
@@ -45,22 +50,6 @@ export const sendMessage = async (message: {
     return response.data;
   } catch (error: any) {
     console.error("Lỗi khi gửi tin nhắn qua API:", error.message);
-    throw error;
-  }
-};
-
-export const sendFileMessage = async (formData: FormData) => {
-  try {
-    console.log("Sending FormData to API:", formData);
-    const response = await api.post("/api/message/upload", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-    });
-    console.log("API response:", response.data);
-    return response.data;
-  } catch (error: any) {
-    console.error("Lỗi khi gửi file qua API:", error.message, error.response?.data);
     throw error;
   }
 };

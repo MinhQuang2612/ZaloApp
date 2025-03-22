@@ -16,7 +16,6 @@ import Footer from "../components/Footer";
 import { fetchMessages, Message } from "../services/message";
 import { fetchContacts, Contact } from "../services/contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { EventRegister } from "react-native-event-listeners";
 
 // Định nghĩa kiểu cho message trong Home
 type HomeMessage = {
@@ -25,7 +24,7 @@ type HomeMessage = {
   createdAt: string;
   unread?: boolean;
   messageID?: string;
-  messageTypeID?: string; // Thêm trường này để xác định loại tin nhắn
+  messageTypeID?: string;
 };
 
 export default function Home() {
@@ -37,12 +36,10 @@ export default function Home() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const router = useRouter();
 
-  // Hàm xác định loại tin nhắn dựa trên messageTypeID
   const determineMessageType = (message: HomeMessage): string => {
-    return message.messageTypeID || "type1"; // Dựa vào messageTypeID từ API
+    return message.messageTypeID || "type1";
   };
 
-  // Hàm trả về nội dung hiển thị trong trang Home
   const getMessagePreview = (message: HomeMessage): string => {
     const effectiveType = determineMessageType(message);
 
@@ -62,6 +59,15 @@ export default function Home() {
       default:
         return "Tin nhắn không xác định";
     }
+  };
+
+  // Hàm chuyển filePath thành URL công khai
+  const convertFilePathToURL = (context: string): string => {
+    if (context && context.startsWith("D:\\CNM\\uploads")) {
+      const fileName = context.split("\\").pop();
+      return `http://192.168.2.158:3000/uploads/${fileName}`;
+    }
+    return context;
   };
 
   const loadMessages = async () => {
@@ -99,12 +105,14 @@ export default function Home() {
 
         if (latestMessage && !seenMessageIDs.has(latestMessage.messageID!)) {
           seenMessageIDs.add(latestMessage.messageID!);
+          // Chuyển filePath thành URL công khai
+          const updatedContext = convertFilePathToURL(latestMessage.context);
           allMessages.push({
             senderID: latestMessage.senderID === userID ? latestMessage.receiverID : latestMessage.senderID,
-            context: latestMessage.context,
+            context: updatedContext,
             createdAt: latestMessage.createdAt,
             messageID: latestMessage.messageID,
-            messageTypeID: latestMessage.messageTypeID, // Lưu messageTypeID
+            messageTypeID: latestMessage.messageTypeID,
             unread: latestMessage.receiverID === userID && !latestMessage.seenStatus?.includes(userID),
           });
         }
@@ -128,22 +136,24 @@ export default function Home() {
         return;
       }
 
-      const newSocket = io("http://192.168.0.1:3000");
+      const newSocket = io("http://192.168.2.158:3000");
       setSocket(newSocket);
 
       newSocket.emit("joinUserRoom", currentUserID);
 
-      newSocket.on("receiveTextMessage", (message: Message) => {
+      newSocket.on("receiveMessage", (message: Message) => {
         console.log("Home.tsx: Received new message via socket:", message);
         if (message.receiverID === currentUserID || message.senderID === currentUserID) {
           setMessages((prev) => {
             const senderID = message.senderID === currentUserID ? message.receiverID : message.senderID;
+            // Chuyển filePath thành URL công khai
+            const updatedContext = convertFilePathToURL(message.context);
             const newMessage: HomeMessage = {
               senderID,
-              context: message.context,
+              context: updatedContext,
               createdAt: message.createdAt,
               messageID: message.messageID,
-              messageTypeID: message.messageTypeID, // Lưu messageTypeID
+              messageTypeID: message.messageTypeID,
               unread: message.receiverID === currentUserID && !message.seenStatus?.includes(currentUserID),
             };
 
@@ -181,14 +191,8 @@ export default function Home() {
         });
       });
 
-      const listener = EventRegister.addEventListener("messageSent", () => {
-        console.log("Home.tsx: Received messageSent event, reloading messages...");
-        loadMessages();
-      });
-
       return () => {
         newSocket.disconnect();
-        EventRegister.removeEventListener(listener as string);
       };
     };
 
