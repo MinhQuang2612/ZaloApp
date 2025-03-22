@@ -65,9 +65,21 @@ export default function Register() {
       DOB: formattedDOB,
     };
     console.log("User data before calling API:", userData);
-    const registeredUser = await registerUser(userData);
-    if (registeredUser) {
-      router.push("/login");
+
+    try {
+      const registeredUser = await registerUser(userData);
+      if (registeredUser) {
+        // Hiển thị thông báo thành công
+        alert("Đăng ký thành công!");
+        // Trì hoãn chuyển trang 1 giây
+        setTimeout(() => {
+          router.push("/login");
+        }, 1000); // 1000ms = 1 giây
+      }
+    } catch (error) {
+      // Hiển thị thông báo lỗi nếu đăng ký thất bại
+      alert("Đăng ký thất bại, vui lòng thử lại!");
+      console.error("Registration error:", error);
     }
   };
 

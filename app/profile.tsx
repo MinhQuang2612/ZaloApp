@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import { getCurrentUser } from "../services/auth";
 import Footer from "../components/Footer";
 import { logoutUser } from "../services/auth";
-import { useSafeAreaInsets } from "react-native-safe-area-context"; // Thư viện hỗ trợ lấy thông tin vùng an toàn
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 interface User {
   _id: string;
   userID: string;
@@ -31,7 +31,8 @@ export default function Profile() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [twoFactorAuth, setTwoFactorAuth] = useState<boolean>(true); // Trạng thái bảo mật 2 lớp
-
+  const insets = useSafeAreaInsets();
+  
   useEffect(() => {
     const fetchUser = async () => {
       const userData = await getCurrentUser();
@@ -55,7 +56,15 @@ export default function Profile() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[
+            styles.container,
+            {
+              // Trên iOS: paddingTop = insets.top để nằm sát dưới Dynamic Island
+              // Trên Android: paddingTop = 3 (giá trị mặc định, không bị ảnh hưởng bởi insets)
+              paddingTop: Platform.OS === "ios" ? insets.top : 3,
+              paddingBottom: 8, // Đảm bảo chiều cao navbar đủ lớn
+            },
+          ]}>
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => router.back()}

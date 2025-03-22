@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { changePassword, validateNewPassword, verifyCurrentPassword } from "../services/password";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function ChangePassword() {
   const router = useRouter();
@@ -15,7 +16,8 @@ export default function ChangePassword() {
   const [currentPasswordError, setCurrentPasswordError] = useState<string | null>(null);
   const [newPasswordError, setNewPasswordError] = useState<string | null>(null);
   const [confirmPasswordError, setConfirmPasswordError] = useState<string | null>(null);
-
+  const insets = useSafeAreaInsets();
+  
   // Kiểm tra mật khẩu hiện tại khi người dùng nhập xong (onBlur)
   const handleCurrentPasswordChange = async (text: string) => {
     setCurrentPassword(text);
@@ -111,7 +113,15 @@ export default function ChangePassword() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[
+            styles.container,
+            {
+              // Trên iOS: paddingTop = insets.top để nằm sát dưới Dynamic Island
+              // Trên Android: paddingTop = 3 (giá trị mặc định, không bị ảnh hưởng bởi insets)
+              paddingTop: Platform.OS === "ios" ? insets.top : 3,
+              paddingBottom: 8, // Đảm bảo chiều cao navbar đủ lớn
+            },
+          ]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
