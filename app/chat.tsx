@@ -197,7 +197,11 @@ export default function Chat() {
   const convertFilePathToURL = (context: string): string => {
     if (context && context.startsWith("D:\\CNM\\uploads")) {
       const fileName = context.split("\\").pop();
+<<<<<<< HEAD
       return `http://192.168.1.34:3000/uploads/${fileName}`;
+=======
+      return `http://192.168.31.171:3000/uploads/${fileName}`;
+>>>>>>> 48e07d50f0a177608de73477b61abfc6a0db841f
     }
     return context;
   };
@@ -254,12 +258,23 @@ export default function Chat() {
         console.error("Lỗi khi lấy tin nhắn ban đầu:", error);
       }
 
+<<<<<<< HEAD
       const newSocket = io("http://192.168.1.34:3000", {
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
         timeout: 20000,
       });
+=======
+      if (!userIDValue) {
+        console.error("(NOBRIDGE) ERROR currentUserID không hợp lệ:", userIDValue);
+        router.replace("/login");
+        setLoading(false);
+        return;
+      }
+
+      const newSocket = io("http://192.168.31.171:3000");
+>>>>>>> 48e07d50f0a177608de73477b61abfc6a0db841f
       setSocket(newSocket);
 
       const joinRooms = () => {

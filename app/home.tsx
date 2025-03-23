@@ -17,7 +17,6 @@ import { fetchMessages, Message } from "../services/message";
 import { fetchContacts, Contact } from "../services/contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// Định nghĩa kiểu cho message trong Home
 type HomeMessage = {
   senderID: string;
   context: string;
@@ -134,7 +133,11 @@ export default function Home() {
         return;
       }
 
+<<<<<<< HEAD
       const newSocket = io("http://192.168.1.34:3000");
+=======
+      const newSocket = io("http://192.168.31.171:3000");
+>>>>>>> 48e07d50f0a177608de73477b61abfc6a0db841f
       setSocket(newSocket);
 
       newSocket.emit("joinUserRoom", currentUserID);
@@ -244,11 +247,12 @@ export default function Home() {
       <Navbar showSearch showQR showAdd addIconType="add" />
 
       {messages.length === 0 ? (
-        <View style={styles.emptyContainer}>
+        <View style={[styles.emptyContainer, { zIndex: 500 }]}>
           <Text style={styles.emptyText}>Không có tin nhắn nào để hiển thị.</Text>
         </View>
       ) : (
         <FlatList
+          style={{ zIndex: 500 }} // Đặt zIndex thấp hơn Navbar
           data={messages}
           keyExtractor={(item, index) => `${item.senderID}-${item.createdAt}-${index}`}
           renderItem={renderItem}
