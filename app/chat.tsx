@@ -111,7 +111,6 @@ const MessageItem = ({
                 source={{ uri: videoUri }}
                 style={styles.video}
                 useNativeControls
-                
                 onError={(e: any) => {
                   console.log("Error loading video:", e);
                   setError("Không thể phát video");
@@ -195,11 +194,10 @@ export default function Chat() {
     }
   }, [stickerSearchTerm, showStickerPicker]);
 
-  // Hàm chuyển filePath thành URL công khai
   const convertFilePathToURL = (context: string): string => {
     if (context && context.startsWith("D:\\CNM\\uploads")) {
       const fileName = context.split("\\").pop();
-      return `http://192.168.2.158:3000/uploads/${fileName}`;
+      return `http://192.168.1.34:3000/uploads/${fileName}`;
     }
     return context;
   };
@@ -240,7 +238,6 @@ export default function Chat() {
 
       try {
         const data = await fetchMessages(userID);
-        // Chuyển filePath thành URL công khai
         const updatedData = data.map((message) => {
           if (
             message.messageTypeID === "type2" ||
@@ -251,35 +248,60 @@ export default function Chat() {
           }
           return message;
         });
-        console.log("Messages loaded:", updatedData);
+        console.log("Messages loaded initially:", updatedData);
         setMessages(updatedData);
       } catch (error) {
-        console.error("Lỗi khi lấy tin nhắn:", error);
+        console.error("Lỗi khi lấy tin nhắn ban đầu:", error);
       }
 
-      if (!userIDValue) {
-        console.error("(NOBRIDGE) ERROR currentUserID không hợp lệ:", userIDValue);
-        router.replace("/login");
-        setLoading(false);
-        return;
-      }
-
-      const newSocket = io("http://192.168.2.158:3000");
+      const newSocket = io("http://192.168.1.34:3000", {
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        timeout: 20000,
+      });
       setSocket(newSocket);
 
-      newSocket.emit("joinUserRoom", userIDValue);
+      const joinRooms = () => {
+        console.log("Joining rooms with userIDValue:", userIDValue, "and userID:", userID);
+        newSocket.emit("joinUserRoom", userIDValue);
+        newSocket.emit("joinUserRoom", userID);
+        console.log(`Joined rooms ${userIDValue} and ${userID}`);
+      };
+
+      newSocket.on("connect", () => {
+        console.log("Socket connected:", newSocket.id);
+        joinRooms();
+      });
+
+      newSocket.on("reconnect", (attempt) => {
+        console.log("Socket reconnected after attempt:", attempt);
+        joinRooms();
+      });
+
+      newSocket.on("connect_error", (error) => {
+        console.error("Socket connection error:", error.message);
+      });
+
+      newSocket.on("reconnect_error", (error) => {
+        console.error("Socket reconnect error:", error.message);
+      });
 
       newSocket.on("receiveMessage", (message: Message) => {
-        console.log("Chat.tsx: Received new message via socket:", message);
+        console.log("Received message from server:", message);
+        console.log("Checking conditions - message.senderID:", message.senderID, "message.receiverID:", message.receiverID);
+        console.log("Current userID:", userID, "currentUserID:", currentUserID);
+
         if (
           (message.senderID === userID && message.receiverID === currentUserID) ||
           (message.senderID === currentUserID && message.receiverID === userID)
         ) {
+          console.log("Message matches this chat, updating messages...");
           setMessages((prev) => {
             const existingMessageIndex = prev.findIndex((msg) => msg.messageID === message.messageID);
+            let updatedMessages;
             if (existingMessageIndex !== -1) {
-              const updatedMessages = [...prev];
-              // Chuyển filePath thành URL công khai
+              updatedMessages = [...prev];
               if (
                 message.messageTypeID === "type2" ||
                 message.messageTypeID === "type3" ||
@@ -288,25 +310,26 @@ export default function Chat() {
                 message.context = convertFilePathToURL(message.context);
               }
               updatedMessages[existingMessageIndex] = message;
-              return updatedMessages;
+            } else {
+              if (
+                message.messageTypeID === "type2" ||
+                message.messageTypeID === "type3" ||
+                message.messageTypeID === "type5"
+              ) {
+                message.context = convertFilePathToURL(message.context);
+              }
+              updatedMessages = [...prev, message];
             }
-            // Chuyển filePath thành URL công khai
-            if (
-              message.messageTypeID === "type2" ||
-              message.messageTypeID === "type3" ||
-              message.messageTypeID === "type5"
-            ) {
-              message.context = convertFilePathToURL(message.context);
-            }
-            const updatedMessages = [...prev, message];
-            console.log("Chat.tsx: Updated messages:", updatedMessages);
+            console.log("Updated messages:", updatedMessages);
             return updatedMessages;
           });
+        } else {
+          console.log("Message does not belong to this chat:", message);
         }
       });
 
       newSocket.on("updateSingleChatSeenStatus", (messageID: string) => {
-        console.log(`Chat.tsx: Received updateSingleChatSeenStatus for messageID: ${messageID}`);
+        console.log(`Received updateSingleChatSeenStatus for messageID: ${messageID}`);
         setMessages((prev) =>
           prev.map((msg) =>
             msg.messageID === messageID
@@ -318,6 +341,7 @@ export default function Chat() {
       });
 
       newSocket.on("reloadMessage", async () => {
+        console.log("Received reloadMessage event");
         const data = await fetchMessages(userID);
         const updatedData = data.map((message) => {
           if (
@@ -332,9 +356,21 @@ export default function Chat() {
         setMessages(updatedData);
       });
 
+      newSocket.on("disconnect", (reason) => {
+        console.log("Socket disconnected:", reason);
+      });
+
       setLoading(false);
 
       return () => {
+        newSocket.off("connect");
+        newSocket.off("reconnect");
+        newSocket.off("connect_error");
+        newSocket.off("reconnect_error");
+        newSocket.off("receiveMessage");
+        newSocket.off("updateSingleChatSeenStatus");
+        newSocket.off("reloadMessage");
+        newSocket.off("disconnect");
         newSocket.disconnect();
       };
     };
@@ -384,7 +420,7 @@ export default function Chat() {
     setInputText("");
 
     socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
-      console.log("Server response:", response);
+      console.log("Server response for text message:", response);
       if (response !== "Đã nhận") {
         setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
         Alert.alert("Lỗi", "Không thể gửi tin nhắn. Vui lòng thử lại.");
@@ -422,7 +458,6 @@ export default function Chat() {
     });
   };
 
-  // Hàm chuyển file thành Base64
   const convertFileToBase64 = async (uri: string): Promise<string> => {
     const fileData = await FileSystem.readAsStringAsync(uri, {
       encoding: FileSystem.EncodingType.Base64,
@@ -483,14 +518,13 @@ export default function Chat() {
     setMessages((prev) => [...prev, tempMessage]);
 
     try {
-      // Chuyển file thành Base64
       const fileBase64 = await convertFileToBase64(fileUri);
 
       const newMessage: Message = {
         senderID: currentUserID,
         receiverID: userID,
         messageTypeID: "type2",
-        context: "", // Context sẽ được backend cập nhật thành filePath
+        context: "",
         messageID,
         createdAt: new Date().toISOString(),
         seenStatus: [],
@@ -572,14 +606,13 @@ export default function Chat() {
     setMessages((prev) => [...prev, tempMessage]);
 
     try {
-      // Chuyển file thành Base64
       const fileBase64 = await convertFileToBase64(fileUri);
 
       const newMessage: Message = {
         senderID: currentUserID,
         receiverID: userID,
         messageTypeID: "type3",
-        context: "", // Context sẽ được backend cập nhật thành filePath
+        context: "",
         messageID,
         createdAt: new Date().toISOString(),
         seenStatus: [],
@@ -650,14 +683,13 @@ export default function Chat() {
     setMessages((prev) => [...prev, tempMessage]);
 
     try {
-      // Chuyển file thành Base64
       const fileBase64 = await convertFileToBase64(fileUri);
 
       const newMessage: Message = {
         senderID: currentUserID,
         receiverID: userID,
         messageTypeID: "type5",
-        context: "", // Context sẽ được backend cập nhật thành filePath
+        context: "",
         messageID,
         createdAt: new Date().toISOString(),
         seenStatus: [],
@@ -685,7 +717,7 @@ export default function Chat() {
     if (flatListRef.current && messages.length > 0) {
       flatListRef.current.scrollToEnd({ animated: true });
     }
-  }, [messages.length]);
+  }, [messages]);
 
   const renderItem = useCallback(
     ({ item, index }: { item: Message; index: number }) => {
@@ -824,7 +856,7 @@ const styles = StyleSheet.create({
   sticker: { width: 100, height: 100, marginVertical: 5 },
   image: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
   videoContainer: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
-  video: { width: "100%", height: "100%", borderRadius: 10 , resizeMode: "contain"},
+  video: { width: "100%", height: "100%", borderRadius: 10, resizeMode: "contain" },
   fileContainer: { flexDirection: "row", alignItems: "center", marginVertical: 5 },
   fileText: { fontSize: 16, color: "#007AFF", marginLeft: 10 },
   inputContainer: {

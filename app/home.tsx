@@ -61,11 +61,10 @@ export default function Home() {
     }
   };
 
-  // Hàm chuyển filePath thành URL công khai
   const convertFilePathToURL = (context: string): string => {
     if (context && context.startsWith("D:\\CNM\\uploads")) {
       const fileName = context.split("\\").pop();
-      return `http://192.168.2.158:3000/uploads/${fileName}`;
+      return `http://192.168.1.34:3000/uploads/${fileName}`;
     }
     return context;
   };
@@ -105,7 +104,6 @@ export default function Home() {
 
         if (latestMessage && !seenMessageIDs.has(latestMessage.messageID!)) {
           seenMessageIDs.add(latestMessage.messageID!);
-          // Chuyển filePath thành URL công khai
           const updatedContext = convertFilePathToURL(latestMessage.context);
           allMessages.push({
             senderID: latestMessage.senderID === userID ? latestMessage.receiverID : latestMessage.senderID,
@@ -136,7 +134,7 @@ export default function Home() {
         return;
       }
 
-      const newSocket = io("http://192.168.2.158:3000");
+      const newSocket = io("http://192.168.1.34:3000");
       setSocket(newSocket);
 
       newSocket.emit("joinUserRoom", currentUserID);
@@ -146,7 +144,6 @@ export default function Home() {
         if (message.receiverID === currentUserID || message.senderID === currentUserID) {
           setMessages((prev) => {
             const senderID = message.senderID === currentUserID ? message.receiverID : message.senderID;
-            // Chuyển filePath thành URL công khai
             const updatedContext = convertFilePathToURL(message.context);
             const newMessage: HomeMessage = {
               senderID,
@@ -159,9 +156,11 @@ export default function Home() {
 
             console.log("Home.tsx: New message processed:", newMessage, "Unread:", newMessage.unread);
 
+            // Tìm bản ghi hiện có với senderID
             const existingIndex = prev.findIndex((msg) => msg.senderID === senderID);
 
             if (existingIndex >= 0) {
+              // Nếu đã có bản ghi, thay thế nó
               const updatedMessages = [...prev];
               updatedMessages[existingIndex] = newMessage;
               const sortedMessages = updatedMessages.sort(
@@ -169,13 +168,14 @@ export default function Home() {
               );
               console.log("Home.tsx: Updated messages (replaced):", sortedMessages);
               return sortedMessages;
+            } else {
+              // Nếu không có bản ghi, thêm mới
+              const updatedMessages = [newMessage, ...prev].sort(
+                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+              );
+              console.log("Home.tsx: Updated messages (added):", updatedMessages);
+              return updatedMessages;
             }
-
-            const updatedMessages = [newMessage, ...prev].sort(
-              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-            );
-            console.log("Home.tsx: Updated messages (added):", updatedMessages);
-            return updatedMessages;
           });
         }
       });
