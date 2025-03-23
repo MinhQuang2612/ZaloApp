@@ -26,7 +26,11 @@ const Navbar: React.FC<NavbarProps> = ({ title, showSearch, showQR, showAdd, add
     if (addButtonRef.current) {
       addButtonRef.current.measure(
         (fx: number, fy: number, width: number, height: number, px: number, py: number) => {
-          setDropdownPosition({ top: py + height + 5, right: screenWidth - px - width });
+          // Tính toán vị trí dropdown chính xác hơn
+          // py là vị trí Y của nút "+", height là chiều cao của nút
+          // Cộng thêm insets.top để đảm bảo dropdown không bị che bởi notch hoặc status bar
+          const adjustedTop = py + height  + 20;
+          setDropdownPosition({ top: adjustedTop, right: screenWidth - px - width });
           setShowDropdown(true);
         }
       );
@@ -42,6 +46,7 @@ const Navbar: React.FC<NavbarProps> = ({ title, showSearch, showQR, showAdd, add
           // Trên Android: paddingTop = 3 (giá trị mặc định, không bị ảnh hưởng bởi insets)
           paddingTop: Platform.OS === "ios" ? insets.top : 3,
           paddingBottom: 8, // Đảm bảo chiều cao navbar đủ lớn
+          zIndex: 1000, // Đặt zIndex cao cho Navbar
         },
       ]}
     >
@@ -117,14 +122,14 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 8,
     paddingHorizontal: 10,
-    height: 40,
+    height: 50,
+    marginTop: 10,
   },
   searchInput: {
     color: "#fff",
-    fontSize: 18,
+    fontSize: 16,
     marginLeft: 10,
     flex: 1,
-    height: 40,
     paddingVertical: 0,
   },
   title: {
@@ -136,10 +141,12 @@ const styles = StyleSheet.create({
   icons: {
     flexDirection: "row",
     alignItems: "center",
+    marginTop: 10,
   },
   icon: {
     marginLeft: 15,
     marginRight: 10,
+    marginHorizontal: 8, // Đều khoảng cách giữa các icon
   },
   overlay: {
     position: "absolute",
@@ -147,7 +154,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.2)",
+    backgroundColor: "rgba(0,0,0,0.3)",
+    zIndex: 2000,
   },
   dropdown: {
     position: "absolute",
@@ -155,7 +163,13 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 10,
     width: 200,
-    elevation: 5,
+    elevation: 10,
+    shadowColor: "#000", // Thêm bóng cho iOS
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    borderWidth: 0.5, // Thêm viền nhẹ
+    borderColor: "#ccc", // Màu viền nhẹ để tăng độ tương phản
   },
   dropdownItem: {
     flexDirection: "row",

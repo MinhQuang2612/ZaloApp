@@ -199,7 +199,7 @@ export default function Chat() {
   const convertFilePathToURL = (context: string): string => {
     if (context && context.startsWith("D:\\CNM\\uploads")) {
       const fileName = context.split("\\").pop();
-      return `http://192.168.2.158:3000/uploads/${fileName}`;
+      return `http://192.168.31.171:3000/uploads/${fileName}`;
     }
     return context;
   };
@@ -264,7 +264,7 @@ export default function Chat() {
         return;
       }
 
-      const newSocket = io("http://192.168.2.158:3000");
+      const newSocket = io("http://192.168.31.171:3000");
       setSocket(newSocket);
 
       newSocket.emit("joinUserRoom", userIDValue);

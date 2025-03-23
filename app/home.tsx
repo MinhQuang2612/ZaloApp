@@ -17,7 +17,6 @@ import { fetchMessages, Message } from "../services/message";
 import { fetchContacts, Contact } from "../services/contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// Định nghĩa kiểu cho message trong Home
 type HomeMessage = {
   senderID: string;
   context: string;
@@ -61,7 +60,6 @@ export default function Home() {
     }
   };
 
-  // Hàm chuyển filePath thành URL công khai
   const convertFilePathToURL = (context: string): string => {
     if (context && context.startsWith("D:\\CNM\\uploads")) {
       const fileName = context.split("\\").pop();
@@ -105,7 +103,6 @@ export default function Home() {
 
         if (latestMessage && !seenMessageIDs.has(latestMessage.messageID!)) {
           seenMessageIDs.add(latestMessage.messageID!);
-          // Chuyển filePath thành URL công khai
           const updatedContext = convertFilePathToURL(latestMessage.context);
           allMessages.push({
             senderID: latestMessage.senderID === userID ? latestMessage.receiverID : latestMessage.senderID,
@@ -136,7 +133,7 @@ export default function Home() {
         return;
       }
 
-      const newSocket = io("http://192.168.2.158:3000");
+      const newSocket = io("http://192.168.31.171:3000");
       setSocket(newSocket);
 
       newSocket.emit("joinUserRoom", currentUserID);
@@ -146,7 +143,6 @@ export default function Home() {
         if (message.receiverID === currentUserID || message.senderID === currentUserID) {
           setMessages((prev) => {
             const senderID = message.senderID === currentUserID ? message.receiverID : message.senderID;
-            // Chuyển filePath thành URL công khai
             const updatedContext = convertFilePathToURL(message.context);
             const newMessage: HomeMessage = {
               senderID,
@@ -244,11 +240,12 @@ export default function Home() {
       <Navbar showSearch showQR showAdd addIconType="add" />
 
       {messages.length === 0 ? (
-        <View style={styles.emptyContainer}>
+        <View style={[styles.emptyContainer, { zIndex: 500 }]}>
           <Text style={styles.emptyText}>Không có tin nhắn nào để hiển thị.</Text>
         </View>
       ) : (
         <FlatList
+          style={{ zIndex: 500 }} // Đặt zIndex thấp hơn Navbar
           data={messages}
           keyExtractor={(item, index) => `${item.senderID}-${item.createdAt}-${index}`}
           renderItem={renderItem}
