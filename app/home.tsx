@@ -61,25 +61,15 @@ export default function Home() {
   };
 
   const convertFilePathToURL = (context: string): string => {
-    if (context && context.startsWith("D:\\CNM\\uploads")) {
+    if (context && context.startsWith(process.env.EXPO_PUBLIC_UPLOADS_PATH || '')) {
       const fileName = context.split("\\").pop();
-      return `http://192.168.1.34:3000/uploads/${fileName}`;
+      return `${process.env.EXPO_PUBLIC_API_URL}/uploads/${fileName}`;
     }
     return context;
   };
 
-  const loadMessages = async () => {
+  const loadMessages = async (userID: string) => {
     try {
-      const userData = await AsyncStorage.getItem("user");
-      if (!userData) {
-        console.error("Không tìm thấy user trong AsyncStorage");
-        throw new Error("Không tìm thấy user");
-      }
-
-      const user = JSON.parse(userData);
-      const userID = user.userID;
-      setCurrentUserID(userID);
-
       const contactsData = await fetchContacts();
       setContacts(contactsData);
 
@@ -119,34 +109,70 @@ export default function Home() {
       setMessages(allMessages);
     } catch (error) {
       console.error("Lỗi khi tải tin nhắn:", error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    const initializeSocket = async () => {
-      await loadMessages();
+    const initializeData = async () => {
+      setLoading(true);
 
-      if (!currentUserID) {
+      const userData = await AsyncStorage.getItem("user");
+      if (!userData) {
+        console.error("Không tìm thấy user trong AsyncStorage");
+        router.replace("/login");
+        setLoading(false);
         return;
       }
 
-<<<<<<< HEAD
-      const newSocket = io("http://192.168.1.34:3000");
-=======
-      const newSocket = io("http://192.168.31.171:3000");
->>>>>>> 48e07d50f0a177608de73477b61abfc6a0db841f
+      const user = JSON.parse(userData);
+      const userID = user.userID;
+      if (!userID) {
+        console.error("userID không hợp lệ trong userData:", user);
+        router.replace("/login");
+        setLoading(false);
+        return;
+      }
+      setCurrentUserID(userID);
+
+      await loadMessages(userID);
+
+      const newSocket = io(process.env.EXPO_PUBLIC_API_URL, {
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        timeout: 20000,
+      });
       setSocket(newSocket);
 
-      newSocket.emit("joinUserRoom", currentUserID);
+      const joinRooms = () => {
+        console.log("Joining room with userID:", userID);
+        newSocket.emit("joinUserRoom", userID);
+        console.log(`Joined room ${userID}`);
+      };
+
+      newSocket.on("connect", () => {
+        console.log("Socket connected:", newSocket.id);
+        joinRooms();
+      });
+
+      newSocket.on("reconnect", (attempt) => {
+        console.log("Socket reconnected after attempt:", attempt);
+        joinRooms();
+      });
+
+      newSocket.on("connect_error", (error) => {
+        console.error("Socket connection error:", error.message);
+      });
+
+      newSocket.on("reconnect_error", (error) => {
+        console.error("Socket reconnect error:", error.message);
+      });
 
       newSocket.on("receiveMessage", (message: Message) => {
         console.log("Home.tsx: Received new message via socket:", message);
-        if (message.receiverID === currentUserID || message.senderID === currentUserID) {
+        if (message.receiverID === userID || message.senderID === userID) {
           setMessages((prev) => {
-            const senderID = message.senderID === currentUserID ? message.receiverID : message.senderID;
+            const senderID = message.senderID === userID ? message.receiverID : message.senderID;
             const updatedContext = convertFilePathToURL(message.context);
             const newMessage: HomeMessage = {
               senderID,
@@ -154,16 +180,14 @@ export default function Home() {
               createdAt: message.createdAt,
               messageID: message.messageID,
               messageTypeID: message.messageTypeID,
-              unread: message.receiverID === currentUserID && !message.seenStatus?.includes(currentUserID),
+              unread: message.receiverID === userID && !message.seenStatus?.includes(userID),
             };
 
             console.log("Home.tsx: New message processed:", newMessage, "Unread:", newMessage.unread);
 
-            // Tìm bản ghi hiện có với senderID
             const existingIndex = prev.findIndex((msg) => msg.senderID === senderID);
 
             if (existingIndex >= 0) {
-              // Nếu đã có bản ghi, thay thế nó
               const updatedMessages = [...prev];
               updatedMessages[existingIndex] = newMessage;
               const sortedMessages = updatedMessages.sort(
@@ -172,7 +196,6 @@ export default function Home() {
               console.log("Home.tsx: Updated messages (replaced):", sortedMessages);
               return sortedMessages;
             } else {
-              // Nếu không có bản ghi, thêm mới
               const updatedMessages = [newMessage, ...prev].sort(
                 (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
               );
@@ -194,17 +217,32 @@ export default function Home() {
         });
       });
 
+      newSocket.on("disconnect", (reason) => {
+        console.log("Socket disconnected:", reason);
+      });
+
+      setLoading(false);
+
       return () => {
+        newSocket.off("connect");
+        newSocket.off("reconnect");
+        newSocket.off("connect_error");
+        newSocket.off("reconnect_error");
+        newSocket.off("receiveMessage");
+        newSocket.off("updateSingleChatSeenStatus");
+        newSocket.off("disconnect");
         newSocket.disconnect();
       };
     };
 
-    initializeSocket();
-  }, [currentUserID]);
+    initializeData();
+  }, []);
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
+    if (!currentUserID) return;
     setRefreshing(true);
-    loadMessages();
+    await loadMessages(currentUserID);
+    setRefreshing(false);
   };
 
   const getUserName = (userID: string) => {
@@ -224,7 +262,7 @@ export default function Home() {
   const renderItem = ({
     item,
   }: {
-    item: { senderID: string; context: string; createdAt: string; unread?: boolean; messageID?: string; messageTypeID?: string };
+    item: { senderID: string; context: string; createdAt: string; messageID?: string; messageTypeID?: string; unread?: boolean };
   }) => (
     <TouchableOpacity
       style={styles.item}
@@ -252,7 +290,7 @@ export default function Home() {
         </View>
       ) : (
         <FlatList
-          style={{ zIndex: 500 }} // Đặt zIndex thấp hơn Navbar
+          style={{ zIndex: 500 }}
           data={messages}
           keyExtractor={(item, index) => `${item.senderID}-${item.createdAt}-${index}`}
           renderItem={renderItem}

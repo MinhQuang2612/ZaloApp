@@ -195,13 +195,9 @@ export default function Chat() {
   }, [stickerSearchTerm, showStickerPicker]);
 
   const convertFilePathToURL = (context: string): string => {
-    if (context && context.startsWith("D:\\CNM\\uploads")) {
+    if (context && context.startsWith(process.env.EXPO_PUBLIC_UPLOADS_PATH || '')) {
       const fileName = context.split("\\").pop();
-<<<<<<< HEAD
-      return `http://192.168.1.34:3000/uploads/${fileName}`;
-=======
-      return `http://192.168.31.171:3000/uploads/${fileName}`;
->>>>>>> 48e07d50f0a177608de73477b61abfc6a0db841f
+      return `${process.env.EXPO_PUBLIC_API_URL}/uploads/${fileName}`;
     }
     return context;
   };
@@ -215,20 +211,23 @@ export default function Chat() {
       if (!userData) {
         console.error("Không tìm thấy user trong AsyncStorage");
         router.replace("/login");
+        setLoading(false);
         return;
       }
 
       const user = JSON.parse(userData);
       const userIDValue = user.userID;
       if (!userIDValue) {
-        console.error("userID không hợp lệ trong userData:", user);
+        console.error("(NOBRIDGE) ERROR currentUserID không hợp lệ:", userIDValue);
         router.replace("/login");
+        setLoading(false);
         return;
       }
       setCurrentUserID(userIDValue);
 
       if (!userID) {
         console.error("userID không hợp lệ:", userID);
+        setLoading(false);
         return;
       }
 
@@ -258,23 +257,12 @@ export default function Chat() {
         console.error("Lỗi khi lấy tin nhắn ban đầu:", error);
       }
 
-<<<<<<< HEAD
-      const newSocket = io("http://192.168.1.34:3000", {
+      const newSocket = io(process.env.EXPO_PUBLIC_API_URL, {
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
         timeout: 20000,
       });
-=======
-      if (!userIDValue) {
-        console.error("(NOBRIDGE) ERROR currentUserID không hợp lệ:", userIDValue);
-        router.replace("/login");
-        setLoading(false);
-        return;
-      }
-
-      const newSocket = io("http://192.168.31.171:3000");
->>>>>>> 48e07d50f0a177608de73477b61abfc6a0db841f
       setSocket(newSocket);
 
       const joinRooms = () => {
@@ -552,13 +540,17 @@ export default function Chat() {
       socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
         console.log("Server response for image:", response);
         if (response !== "Đã nhận") {
-          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+          setMessages((prev) =>
+            prev.filter((msg) => (msg.messageID ? msg.messageID !== messageID : true))
+          );
           Alert.alert("Lỗi", "Không thể gửi ảnh. Vui lòng thử lại.");
         }
       });
     } catch (error) {
       console.error("Lỗi khi gửi ảnh:", error);
-      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+      setMessages((prev) =>
+        prev.filter((msg) => (msg.messageID ? msg.messageID !== messageID : true))
+      );
       Alert.alert("Lỗi", "Không thể gửi ảnh. Vui lòng thử lại.");
     }
   };
@@ -640,13 +632,17 @@ export default function Chat() {
       socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
         console.log("Server response for video:", response);
         if (response !== "Đã nhận") {
-          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+          setMessages((prev) =>
+            prev.filter((msg) => (msg.messageID ? msg.messageID !== messageID : true))
+          );
           Alert.alert("Lỗi", "Không thể gửi video. Vui lòng thử lại.");
         }
       });
     } catch (error) {
       console.error("Lỗi khi gửi video:", error);
-      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+      setMessages((prev) =>
+        prev.filter((msg) => (msg.messageID ? msg.messageID !== messageID : true))
+      );
       Alert.alert("Lỗi", "Không thể gửi video. Vui lòng thử lại.");
     }
   };
@@ -717,13 +713,17 @@ export default function Chat() {
       socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
         console.log("Server response for file:", response);
         if (response !== "Đã nhận") {
-          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+          setMessages((prev) =>
+            prev.filter((msg) => (msg.messageID ? msg.messageID !== messageID : true))
+          );
           Alert.alert("Lỗi", "Không thể gửi file. Vui lòng thử lại.");
         }
       });
     } catch (error) {
       console.error("Lỗi khi gửi file:", error);
-      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+      setMessages((prev) =>
+        prev.filter((msg) => (msg.messageID ? msg.messageID !== messageID : true))
+      );
       Alert.alert("Lỗi", "Không thể gửi file. Vui lòng thử lại.");
     }
   };
