@@ -117,12 +117,15 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 8,
     paddingHorizontal: 10,
+    height: 40,
   },
   searchInput: {
     color: "#fff",
     fontSize: 18,
     marginLeft: 10,
     flex: 1,
+    height: 40,
+    paddingVertical: 0,
   },
   title: {
     color: "#fff",
