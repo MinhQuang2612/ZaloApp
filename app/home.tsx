@@ -16,6 +16,7 @@ import Footer from "../components/Footer";
 import { fetchMessages, Message } from "../services/message";
 import { fetchContacts, Contact } from "../services/contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getAccessToken } from "../services/auth"; // Import hàm getAccessToken
 
 type HomeMessage = {
   senderID: string;
@@ -60,8 +61,20 @@ export default function Home() {
     }
   };
 
+  // Hàm chọn đường dẫn uploads dựa trên máy
+  const getUploadsPath = (): string => {
+    const machine = process.env.EXPO_PUBLIC_MACHINE || "MACHINE_1";
+    if (machine === "MACHINE_1") {
+      return process.env.EXPO_PUBLIC_UPLOADS_PATH_MACHINE_1 || "";
+    } else if (machine === "MACHINE_2") {
+      return process.env.EXPO_PUBLIC_UPLOADS_PATH_MACHINE_2 || "";
+    }
+    return process.env.EXPO_PUBLIC_UPLOADS_PATH || "";
+  };
+
   const convertFilePathToURL = (context: string): string => {
-    if (context && context.startsWith(process.env.EXPO_PUBLIC_UPLOADS_PATH || '')) {
+    const uploadsPath = getUploadsPath();
+    if (context && context.startsWith(uploadsPath)) {
       const fileName = context.split("\\").pop();
       return `${process.env.EXPO_PUBLIC_API_URL}/uploads/${fileName}`;
     }
@@ -136,11 +149,23 @@ export default function Home() {
 
       await loadMessages(userID);
 
+      // Lấy accessToken từ AsyncStorage
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        console.error("Không tìm thấy accessToken, chuyển hướng về login");
+        router.replace("/login");
+        setLoading(false);
+        return;
+      }
+
       const newSocket = io(process.env.EXPO_PUBLIC_API_URL, {
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
         timeout: 20000,
+        auth: {
+          token: accessToken, // Gửi accessToken để xác thực
+        },
       });
       setSocket(newSocket);
 
@@ -162,6 +187,9 @@ export default function Home() {
 
       newSocket.on("connect_error", (error) => {
         console.error("Socket connection error:", error.message);
+        if (error.message === "Authentication error" || error.message === "Invalid token") {
+          router.replace("/login");
+        }
       });
 
       newSocket.on("reconnect_error", (error) => {

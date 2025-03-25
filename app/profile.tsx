@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   Switch,
   Platform,
-
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,14 +15,13 @@ import { getCurrentUser } from "../services/auth";
 import Footer from "../components/Footer";
 import { logoutUser } from "../services/auth";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+// Cập nhật interface User để khớp với dữ liệu từ API
 interface User {
-  _id: string;
-  userID: string;
+  userID: string; // Thay _id bằng userID
   phoneNumber: string;
   username: string;
-  accountRole: string;
   DOB: string;
-  __v: number;
 }
 
 export default function Profile() {
@@ -32,14 +30,14 @@ export default function Profile() {
   const [loading, setLoading] = useState<boolean>(true);
   const [twoFactorAuth, setTwoFactorAuth] = useState<boolean>(true); // Trạng thái bảo mật 2 lớp
   const insets = useSafeAreaInsets();
-  
+
   useEffect(() => {
     const fetchUser = async () => {
       const userData = await getCurrentUser();
       if (!userData) {
         router.replace("/login");
       } else {
-        setUser(userData);
+        setUser(userData); // userData đã khớp với interface User
       }
       setLoading(false);
     };
@@ -56,20 +54,17 @@ export default function Profile() {
   }
 
   return (
-    <View style={[
-            styles.container,
-            {
-              // Trên iOS: paddingTop = insets.top để nằm sát dưới Dynamic Island
-              // Trên Android: paddingTop = 3 (giá trị mặc định, không bị ảnh hưởng bởi insets)
-              paddingTop: Platform.OS === "ios" ? insets.top : 3,
-              paddingBottom: 8, // Đảm bảo chiều cao navbar đủ lớn
-            },
-          ]}>
+    <View
+      style={[
+        styles.container,
+        {
+          paddingTop: Platform.OS === "ios" ? insets.top : 3,
+          paddingBottom: 8,
+        },
+      ]}
+    >
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-        >
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
         <Text style={styles.title}>Tài khoản và bảo mật</Text>
@@ -77,20 +72,12 @@ export default function Profile() {
 
       {/* Thông tin tài khoản */}
       <Text style={styles.sectionTitle}>Tài khoản</Text>
-      <TouchableOpacity
-        style={styles.card}
-        onPress={() => router.push("/profile_details")}
-      >
+      <TouchableOpacity style={styles.card} onPress={() => router.push("/profile_details")}>
         <View style={styles.row}>
-          <Image
-            source={require("../assets/images/dog_avatar.gif")}
-            style={styles.avatar}
-          />
+          <Image source={require("../assets/images/dog_avatar.gif")} style={styles.avatar} />
           <View style={styles.userInfo}>
             <Text style={styles.subText}>Thông tin cá nhân</Text>
-            <Text style={styles.userName}>
-              {user?.username || "Không có tên"}
-            </Text>
+            <Text style={styles.userName}>{user?.username || "Không có tên"}</Text>
           </View>
           <Ionicons name="chevron-forward" size={22} color="#999" />
         </View>
@@ -128,10 +115,7 @@ export default function Profile() {
         <Switch value={twoFactorAuth} onValueChange={setTwoFactorAuth} />
       </View>
 
-      <TouchableOpacity
-        style={styles.item}
-        onPress={() => router.push("/change_password")}
-      >
+      <TouchableOpacity style={styles.item} onPress={() => router.push("/change_password")}>
         <Ionicons name="key" size={22} color="#007AFF" />
         <Text style={styles.itemText}>Đổi mật khẩu</Text>
         <Ionicons name="chevron-forward" size={22} color="#999" />
@@ -146,8 +130,8 @@ export default function Profile() {
       <TouchableOpacity
         style={[styles.item, { borderBottomWidth: 0 }]}
         onPress={async () => {
-          await logoutUser(); // Xóa thông tin đăng nhập
-          router.replace("/login"); 
+          await logoutUser();
+          router.replace("/login");
         }}
       >
         <Ionicons name="log-out-outline" size={22} color="red" />
@@ -165,7 +149,7 @@ export default function Profile() {
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1, // Container chính chiếm toàn bộ chiều cao màn hình
+    flex: 1,
     backgroundColor: "#fff",
     paddingHorizontal: 15,
   },
@@ -185,7 +169,6 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: "bold",
-    //marginTop: 20,
     marginBottom: 10,
     color: "#333",
   },

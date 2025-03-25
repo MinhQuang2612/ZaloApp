@@ -2,24 +2,24 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import api from "./api";
 
 interface User {
-  _id: string;
   userID: string;
   phoneNumber: string;
   username: string;
-  accountRole: string;
   DOB: string;
-  __v: number;
 }
 
 interface LoginResponse {
   message: string;
   user: User;
+  accessToken: string;
+  refreshToken: string;
 }
 
 // Hàm đăng nhập
 export const loginUser = async (phoneNumber: string, password: string): Promise<User> => {
   try {
-    const response = await api.post("/api/user/login", { phoneNumber, password });
+    // Gọi endpoint mới /api/auth/login
+    const response = await api.post("/api/auth/login", { phoneNumber, password });
 
     console.log("Dữ liệu API trả về:", response.data);
 
@@ -27,16 +27,20 @@ export const loginUser = async (phoneNumber: string, password: string): Promise<
       throw new Error("API không trả về thông tin người dùng hợp lệ!");
     }
 
-    const user = response.data.user as User;
+    const { user, accessToken, refreshToken } = response.data;
 
     // Lưu thông tin user vào AsyncStorage
     await AsyncStorage.setItem("user", JSON.stringify(user));
-    console.log("Đã lưu user vào AsyncStorage:", user); // Thêm log để kiểm tra
+    console.log("Đã lưu user vào AsyncStorage:", user);
 
-    // Nếu API trả về token, lưu token
-    if (response.data.token) {
-      await AsyncStorage.setItem("userToken", response.data.token);
-      console.log("Đã lưu token vào AsyncStorage:", response.data.token);
+    // Lưu accessToken và refreshToken
+    if (accessToken) {
+      await AsyncStorage.setItem("accessToken", accessToken);
+      console.log("Đã lưu accessToken vào AsyncStorage:", accessToken);
+    }
+    if (refreshToken) {
+      await AsyncStorage.setItem("refreshToken", refreshToken);
+      console.log("Đã lưu refreshToken vào AsyncStorage:", refreshToken);
     }
 
     return user;
@@ -49,13 +53,13 @@ export const loginUser = async (phoneNumber: string, password: string): Promise<
 // Lấy user từ AsyncStorage
 export const getCurrentUser = async (): Promise<User | null> => {
   try {
-    const userData = await AsyncStorage.getItem("user"); 
+    const userData = await AsyncStorage.getItem("user");
     if (!userData) {
       console.log("Không tìm thấy user trong AsyncStorage");
       return null;
     }
     const parsedUser = JSON.parse(userData) as User;
-    console.log("User lấy từ AsyncStorage:", parsedUser); // Log để kiểm tra
+    console.log("User lấy từ AsyncStorage:", parsedUser);
     return parsedUser;
   } catch (error) {
     console.error("Lỗi khi lấy user từ AsyncStorage:", error);
@@ -63,8 +67,52 @@ export const getCurrentUser = async (): Promise<User | null> => {
   }
 };
 
+// Lấy accessToken từ AsyncStorage
+export const getAccessToken = async (): Promise<string | null> => {
+  try {
+    const token = await AsyncStorage.getItem("accessToken");
+    if (!token) {
+      console.log("Không tìm thấy accessToken trong AsyncStorage");
+      return null;
+    }
+    return token;
+  } catch (error) {
+    console.error("Lỗi khi lấy accessToken từ AsyncStorage:", error);
+    return null;
+  }
+};
+
+// Lấy refreshToken từ AsyncStorage
+export const getRefreshToken = async (): Promise<string | null> => {
+  try {
+    const token = await AsyncStorage.getItem("refreshToken");
+    if (!token) {
+      console.log("Không tìm thấy refreshToken trong AsyncStorage");
+      return null;
+    }
+    return token;
+  } catch (error) {
+    console.error("Lỗi khi lấy refreshToken từ AsyncStorage:", error);
+    return null;
+  }
+};
+
 // Hàm đăng xuất
 export const logoutUser = async () => {
-  await AsyncStorage.removeItem("user");
-  await AsyncStorage.removeItem("userToken"); // Xóa token nếu có
+  try {
+    const refreshToken = await getRefreshToken();
+    if (refreshToken) {
+      // Gọi API logout để xóa refreshToken trên server
+      await api.post("/api/auth/logout", { refreshToken });
+      console.log("Đã gọi API logout để xóa refreshToken trên server");
+    }
+  } catch (error) {
+    console.error("Lỗi khi gọi API logout:", error);
+  } finally {
+    // Xóa dữ liệu cục bộ
+    await AsyncStorage.removeItem("user");
+    await AsyncStorage.removeItem("accessToken");
+    await AsyncStorage.removeItem("refreshToken");
+    console.log("Đã xóa thông tin đăng nhập cục bộ");
+  }
 };

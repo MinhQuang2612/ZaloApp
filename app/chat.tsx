@@ -25,6 +25,7 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import { Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { getAccessToken } from "../services/auth"; // Import hàm getAccessToken
 
 // Định nghĩa kiểu cho response từ socket
 type SocketResponse =
@@ -194,8 +195,20 @@ export default function Chat() {
     }
   }, [stickerSearchTerm, showStickerPicker]);
 
+  // Hàm chọn đường dẫn uploads dựa trên máy
+  const getUploadsPath = (): string => {
+    const machine = process.env.EXPO_PUBLIC_MACHINE || "MACHINE_1";
+    if (machine === "MACHINE_1") {
+      return process.env.EXPO_PUBLIC_UPLOADS_PATH_MACHINE_1 || "";
+    } else if (machine === "MACHINE_2") {
+      return process.env.EXPO_PUBLIC_UPLOADS_PATH_MACHINE_2 || "";
+    }
+    return process.env.EXPO_PUBLIC_UPLOADS_PATH || "";
+  };
+
   const convertFilePathToURL = (context: string): string => {
-    if (context && context.startsWith(process.env.EXPO_PUBLIC_UPLOADS_PATH || '')) {
+    const uploadsPath = getUploadsPath();
+    if (context && context.startsWith(uploadsPath)) {
       const fileName = context.split("\\").pop();
       return `${process.env.EXPO_PUBLIC_API_URL}/uploads/${fileName}`;
     }
@@ -257,11 +270,23 @@ export default function Chat() {
         console.error("Lỗi khi lấy tin nhắn ban đầu:", error);
       }
 
+      // Lấy accessToken từ AsyncStorage
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        console.error("Không tìm thấy accessToken, chuyển hướng về login");
+        router.replace("/login");
+        setLoading(false);
+        return;
+      }
+
       const newSocket = io(process.env.EXPO_PUBLIC_API_URL, {
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
         timeout: 20000,
+        auth: {
+          token: accessToken, // Gửi accessToken để xác thực
+        },
       });
       setSocket(newSocket);
 
@@ -284,6 +309,9 @@ export default function Chat() {
 
       newSocket.on("connect_error", (error) => {
         console.error("Socket connection error:", error.message);
+        if (error.message === "Authentication error" || error.message === "Invalid token") {
+          router.replace("/login");
+        }
       });
 
       newSocket.on("reconnect_error", (error) => {
@@ -753,10 +781,15 @@ export default function Chat() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.navbar, {
-        paddingTop: Platform.OS === "ios" ? insets.top : 3,
-        paddingBottom: 8,
-      }]}>
+      <View
+        style={[
+          styles.navbar,
+          {
+            paddingTop: Platform.OS === "ios" ? insets.top : 3,
+            paddingBottom: 8,
+          },
+        ]}
+      >
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
