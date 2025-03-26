@@ -16,7 +16,6 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { io, Socket } from "socket.io-client";
 import { fetchMessages, sendMessage, Message } from "../services/message";
 import { fetchUserByID } from "../services/contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -25,9 +24,8 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import { Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { getAccessToken } from "../services/auth"; // Import hàm getAccessToken
+import socket, { connectSocket } from "../services/socket";
 
-// Định nghĩa kiểu cho response từ socket
 type SocketResponse =
   | "đang gửi"
   | "đã nhận"
@@ -38,7 +36,6 @@ type SocketResponse =
   | "Đã cập nhật seenStatus chat nhóm"
   | string;
 
-// Định nghĩa kiểu cho sticker từ Giphy
 type GiphySticker = {
   id: string;
   images: {
@@ -48,7 +45,6 @@ type GiphySticker = {
   };
 };
 
-// Component con để render từng tin nhắn
 const MessageItem = ({
   item,
   currentUserID,
@@ -155,9 +151,29 @@ const MessageItem = ({
   );
 };
 
-// Hàm xác định loại tin nhắn
 const determineMessageType = (message: Message): string => {
   return message.messageTypeID || "type1";
+};
+
+const getMessagePreview = (message: Message): string => {
+  const effectiveType = determineMessageType(message);
+
+  switch (effectiveType) {
+    case "type1":
+      return message.context.length > 50
+        ? message.context.substring(0, 50) + "..."
+        : message.context;
+    case "type2":
+      return "Đã gửi ảnh";
+    case "type3":
+      return "Đã gửi video";
+    case "type4":
+      return "Đã gửi sticker";
+    case "type5":
+      return "Đã gửi file";
+    default:
+      return "Tin nhắn không xác định";
+  }
 };
 
 export default function Chat() {
@@ -168,7 +184,6 @@ export default function Chat() {
   const [currentUserID, setCurrentUserID] = useState<string | null>(null);
   const [receiverName, setReceiverName] = useState<string>("Đang tải...");
   const [loading, setLoading] = useState(true);
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [markedAsSeen, setMarkedAsSeen] = useState<Set<string>>(new Set());
   const flatListRef = useRef<FlatList>(null);
 
@@ -195,7 +210,6 @@ export default function Chat() {
     }
   }, [stickerSearchTerm, showStickerPicker]);
 
-  // Hàm chọn đường dẫn uploads dựa trên máy
   const getUploadsPath = (): string => {
     const machine = process.env.EXPO_PUBLIC_MACHINE || "MACHINE_1";
     if (machine === "MACHINE_1") {
@@ -208,6 +222,9 @@ export default function Chat() {
 
   const convertFilePathToURL = (context: string): string => {
     const uploadsPath = getUploadsPath();
+    if (context && (context.startsWith("http://") || context.startsWith("https://"))) {
+      return context;
+    }
     if (context && context.startsWith(uploadsPath)) {
       const fileName = context.split("\\").pop();
       return `${process.env.EXPO_PUBLIC_API_URL}/uploads/${fileName}`;
@@ -218,149 +235,85 @@ export default function Chat() {
   useEffect(() => {
     const initializeSocketAndData = async () => {
       setLoading(true);
-
+  
       const userData = await AsyncStorage.getItem("user");
-      console.log("User data from AsyncStorage in Chat:", userData);
       if (!userData) {
         console.error("Không tìm thấy user trong AsyncStorage");
         router.replace("/login");
         setLoading(false);
         return;
       }
-
+  
       const user = JSON.parse(userData);
       const userIDValue = user.userID;
       if (!userIDValue) {
-        console.error("(NOBRIDGE) ERROR currentUserID không hợp lệ:", userIDValue);
+        console.error("currentUserID không hợp lệ:", userIDValue);
         router.replace("/login");
         setLoading(false);
         return;
       }
       setCurrentUserID(userIDValue);
-
+  
       if (!userID) {
         console.error("userID không hợp lệ:", userID);
         setLoading(false);
         return;
       }
-
+  
       try {
         const receiverData = await fetchUserByID(userID);
         setReceiverName(receiverData?.username || "Người dùng chưa xác định");
       } catch (error) {
         console.error("Lỗi khi lấy thông tin người dùng:", error);
-        setReceiverName("Người dùng chưa xác định");
       }
-
+  
       try {
         const data = await fetchMessages(userID);
         const updatedData = data.map((message) => {
-          if (
-            message.messageTypeID === "type2" ||
-            message.messageTypeID === "type3" ||
-            message.messageTypeID === "type5"
-          ) {
+          if (message.messageTypeID === "type2" || message.messageTypeID === "type3" || message.messageTypeID === "type5") {
             message.context = convertFilePathToURL(message.context);
           }
           return message;
         });
-        console.log("Messages loaded initially:", updatedData);
         setMessages(updatedData);
       } catch (error) {
         console.error("Lỗi khi lấy tin nhắn ban đầu:", error);
       }
-
-      // Lấy accessToken từ AsyncStorage
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        console.error("Không tìm thấy accessToken, chuyển hướng về login");
-        router.replace("/login");
-        setLoading(false);
-        return;
-      }
-
-      const newSocket = io(process.env.EXPO_PUBLIC_API_URL, {
-        reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000,
-        timeout: 20000,
-        auth: {
-          token: accessToken, // Gửi accessToken để xác thực
-        },
+  
+      // Đảm bảo socket kết nối và join room
+      connectSocket();
+      socket.emit("joinUserRoom", userIDValue);
+      socket.emit("joinUserRoom", userID);
+      console.log("Chat.tsx: Joined rooms:", userIDValue, userID);
+  
+      socket.on("connect", () => {
+        console.log("Chat.tsx: Socket connected:", socket.id);
+        socket.emit("joinUserRoom", userIDValue);
+        socket.emit("joinUserRoom", userID);
       });
-      setSocket(newSocket);
-
-      const joinRooms = () => {
-        console.log("Joining rooms with userIDValue:", userIDValue, "and userID:", userID);
-        newSocket.emit("joinUserRoom", userIDValue);
-        newSocket.emit("joinUserRoom", userID);
-        console.log(`Joined rooms ${userIDValue} and ${userID}`);
-      };
-
-      newSocket.on("connect", () => {
-        console.log("Socket connected:", newSocket.id);
-        joinRooms();
-      });
-
-      newSocket.on("reconnect", (attempt) => {
-        console.log("Socket reconnected after attempt:", attempt);
-        joinRooms();
-      });
-
-      newSocket.on("connect_error", (error) => {
-        console.error("Socket connection error:", error.message);
-        if (error.message === "Authentication error" || error.message === "Invalid token") {
-          router.replace("/login");
-        }
-      });
-
-      newSocket.on("reconnect_error", (error) => {
-        console.error("Socket reconnect error:", error.message);
-      });
-
-      newSocket.on("receiveMessage", (message: Message) => {
-        console.log("Received message from server:", message);
-        console.log("Checking conditions - message.senderID:", message.senderID, "message.receiverID:", message.receiverID);
-        console.log("Current userID:", userID, "currentUserID:", currentUserID);
-
+  
+      socket.on("receiveMessage", (message: Message) => {
+        console.log("Chat.tsx: Received message:", message);
         if (
-          (message.senderID === userID && message.receiverID === currentUserID) ||
-          (message.senderID === currentUserID && message.receiverID === userID)
+          (message.senderID === userID && message.receiverID === userIDValue) ||
+          (message.senderID === userIDValue && message.receiverID === userID)
         ) {
-          console.log("Message matches this chat, updating messages...");
           setMessages((prev) => {
-            const existingMessageIndex = prev.findIndex((msg) => msg.messageID === message.messageID);
-            let updatedMessages;
-            if (existingMessageIndex !== -1) {
-              updatedMessages = [...prev];
-              if (
-                message.messageTypeID === "type2" ||
-                message.messageTypeID === "type3" ||
-                message.messageTypeID === "type5"
-              ) {
+            const exists = prev.some((msg) => msg.messageID === message.messageID);
+            if (!exists) {
+              if (message.messageTypeID === "type2" || message.messageTypeID === "type3" || message.messageTypeID === "type5") {
                 message.context = convertFilePathToURL(message.context);
               }
-              updatedMessages[existingMessageIndex] = message;
-            } else {
-              if (
-                message.messageTypeID === "type2" ||
-                message.messageTypeID === "type3" ||
-                message.messageTypeID === "type5"
-              ) {
-                message.context = convertFilePathToURL(message.context);
-              }
-              updatedMessages = [...prev, message];
+              return [...prev, message];
             }
-            console.log("Updated messages:", updatedMessages);
-            return updatedMessages;
+            return prev;
           });
-        } else {
-          console.log("Message does not belong to this chat:", message);
+          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
         }
       });
-
-      newSocket.on("updateSingleChatSeenStatus", (messageID: string) => {
-        console.log(`Received updateSingleChatSeenStatus for messageID: ${messageID}`);
+  
+      socket.on("updateSingleChatSeenStatus", (messageID: string) => {
+        console.log("Chat.tsx: Update seen status for messageID:", messageID);
         setMessages((prev) =>
           prev.map((msg) =>
             msg.messageID === messageID
@@ -368,69 +321,49 @@ export default function Chat() {
               : msg
           )
         );
-        setMarkedAsSeen((prev) => new Set(prev).add(messageID));
       });
-
-      newSocket.on("reloadMessage", async () => {
-        console.log("Received reloadMessage event");
-        const data = await fetchMessages(userID);
-        const updatedData = data.map((message) => {
-          if (
-            message.messageTypeID === "type2" ||
-            message.messageTypeID === "type3" ||
-            message.messageTypeID === "type5"
-          ) {
-            message.context = convertFilePathToURL(message.context);
-          }
-          return message;
-        });
-        setMessages(updatedData);
+  
+      socket.on("disconnect", (reason) => {
+        console.log("Chat.tsx: Socket disconnected:", reason);
       });
-
-      newSocket.on("disconnect", (reason) => {
-        console.log("Socket disconnected:", reason);
-      });
-
+  
       setLoading(false);
-
+  
       return () => {
-        newSocket.off("connect");
-        newSocket.off("reconnect");
-        newSocket.off("connect_error");
-        newSocket.off("reconnect_error");
-        newSocket.off("receiveMessage");
-        newSocket.off("updateSingleChatSeenStatus");
-        newSocket.off("reloadMessage");
-        newSocket.off("disconnect");
-        newSocket.disconnect();
+        socket.off("connect");
+        socket.off("receiveMessage");
+        socket.off("updateSingleChatSeenStatus");
+        socket.off("disconnect");
       };
     };
-
+  
     initializeSocketAndData();
   }, [userID]);
-
+  
   useEffect(() => {
-    if (currentUserID && socket && messages.length > 0) {
+    if (currentUserID && messages.length > 0) {
       const unreadMessages = messages.filter(
         (msg) =>
           msg.receiverID === currentUserID &&
           !msg.seenStatus?.includes(currentUserID) &&
           !markedAsSeen.has(msg.messageID || "")
       );
-      console.log("Unread messages to mark as seen:", unreadMessages);
+      console.log("Chat.tsx: Marking as seen:", unreadMessages.length, "messages");
       unreadMessages.forEach((msg) => {
-        socket.emit("seenMessage", msg.messageID, currentUserID, (response: SocketResponse) => {
-          console.log("Seen response:", response);
-          if (response === "Đã cập nhật seenStatus chat đơn") {
-            setMarkedAsSeen((prev) => new Set(prev).add(msg.messageID || ""));
-          }
-        });
+        if (msg.messageID) {
+          socket.emit("seenMessage", msg.messageID, currentUserID, (response: SocketResponse) => {
+            console.log("Chat.tsx: Seen response:", response);
+            if (response === "Đã cập nhật seenStatus chat đơn") {
+              setMarkedAsSeen((prev) => new Set(prev).add(msg.messageID!));
+            }
+          });
+        }
       });
     }
-  }, [messages, currentUserID, socket]);
+  }, [messages, currentUserID]);
 
   const handleSendMessage = async () => {
-    if (!inputText.trim() || !userID || !currentUserID || !socket) return;
+    if (!inputText.trim() || !userID || !currentUserID) return;
 
     const messageID = `${socket.id}-${Date.now()}`;
     const newMessage: Message = {
@@ -443,11 +376,7 @@ export default function Chat() {
       seenStatus: [],
     };
 
-    setMessages((prev) => {
-      const updatedMessages = [...prev, newMessage];
-      console.log("Chat.tsx: Added new message locally:", updatedMessages);
-      return updatedMessages;
-    });
+    setMessages((prev) => [...prev, newMessage]);
     setInputText("");
 
     socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
@@ -464,7 +393,7 @@ export default function Chat() {
       Alert.alert("Lỗi", "Sticker URL không hợp lệ.");
       return;
     }
-    if (!userID || !currentUserID || !socket) return;
+    if (!userID || !currentUserID) return;
 
     const messageID = `${socket.id}-${Date.now()}`;
     const newMessage: Message = {
@@ -511,30 +440,12 @@ export default function Chat() {
       quality: 0.8,
     });
 
-    if (result.canceled) {
-      console.log("User cancelled image picker");
-      return;
-    }
+    if (result.canceled) return;
 
     const file = result.assets[0];
-    if (!file) {
-      console.log("No image selected");
-      return;
-    }
+    if (!file || !userID || !currentUserID) return;
 
     const fileUri = file.uri;
-    if (!fileUri || !userID || !currentUserID || !socket) {
-      console.log("Missing required data:", { fileUri, userID, currentUserID, socket });
-      return;
-    }
-
-    const fileInfo = await FileSystem.getInfoAsync(fileUri);
-    if (!fileInfo.exists) {
-      console.log("Image file does not exist:", fileUri);
-      Alert.alert("Lỗi", "File ảnh không tồn tại. Vui lòng thử lại.");
-      return;
-    }
-
     const messageID = `${socket.id}-${Date.now()}`;
     const tempMessage: Message = {
       senderID: currentUserID,
@@ -550,7 +461,6 @@ export default function Chat() {
 
     try {
       const fileBase64 = await convertFileToBase64(fileUri);
-
       const newMessage: Message = {
         senderID: currentUserID,
         receiverID: userID,
@@ -559,26 +469,19 @@ export default function Chat() {
         messageID,
         createdAt: new Date().toISOString(),
         seenStatus: [],
-        file: {
-          name: `image-${Date.now()}.jpg`,
-          data: fileBase64,
-        },
+        file: { name: `image-${Date.now()}.jpg`, data: fileBase64 },
       };
 
       socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
         console.log("Server response for image:", response);
         if (response !== "Đã nhận") {
-          setMessages((prev) =>
-            prev.filter((msg) => (msg.messageID ? msg.messageID !== messageID : true))
-          );
+          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
           Alert.alert("Lỗi", "Không thể gửi ảnh. Vui lòng thử lại.");
         }
       });
     } catch (error) {
       console.error("Lỗi khi gửi ảnh:", error);
-      setMessages((prev) =>
-        prev.filter((msg) => (msg.messageID ? msg.messageID !== messageID : true))
-      );
+      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
       Alert.alert("Lỗi", "Không thể gửi ảnh. Vui lòng thử lại.");
     }
   };
@@ -598,32 +501,14 @@ export default function Chat() {
       quality: 0.8,
     });
 
-    if (result.canceled) {
-      console.log("User cancelled video picker");
-      return;
-    }
+    if (result.canceled) return;
 
     const file = result.assets[0];
-    if (!file) {
-      console.log("No video selected");
-      return;
-    }
+    if (!file || !userID || !currentUserID) return;
 
     const fileUri = file.uri;
-    if (!fileUri || !userID || !currentUserID || !socket) {
-      console.log("Missing required data:", { fileUri, userID, currentUserID, socket });
-      return;
-    }
-
     if (!fileUri.match(/\.(mp4|mov|avi)$/i)) {
       Alert.alert("Lỗi", "Chỉ hỗ trợ video định dạng .mp4, .mov, hoặc .avi.");
-      return;
-    }
-
-    const fileInfo = await FileSystem.getInfoAsync(fileUri);
-    if (!fileInfo.exists) {
-      console.log("Video file does not exist:", fileUri);
-      Alert.alert("Lỗi", "File video không tồn tại. Vui lòng thử lại.");
       return;
     }
 
@@ -642,7 +527,6 @@ export default function Chat() {
 
     try {
       const fileBase64 = await convertFileToBase64(fileUri);
-
       const newMessage: Message = {
         senderID: currentUserID,
         receiverID: userID,
@@ -651,63 +535,32 @@ export default function Chat() {
         messageID,
         createdAt: new Date().toISOString(),
         seenStatus: [],
-        file: {
-          name: `video-${Date.now()}.mp4`,
-          data: fileBase64,
-        },
+        file: { name: `video-${Date.now()}.mp4`, data: fileBase64 },
       };
 
       socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
         console.log("Server response for video:", response);
         if (response !== "Đã nhận") {
-          setMessages((prev) =>
-            prev.filter((msg) => (msg.messageID ? msg.messageID !== messageID : true))
-          );
+          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
           Alert.alert("Lỗi", "Không thể gửi video. Vui lòng thử lại.");
         }
       });
     } catch (error) {
       console.error("Lỗi khi gửi video:", error);
-      setMessages((prev) =>
-        prev.filter((msg) => (msg.messageID ? msg.messageID !== messageID : true))
-      );
+      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
       Alert.alert("Lỗi", "Không thể gửi video. Vui lòng thử lại.");
     }
   };
 
   const handleSendFile = async () => {
-    const result = await DocumentPicker.getDocumentAsync({
-      type: "*/*",
-      copyToCacheDirectory: true,
-    });
-
-    console.log("DocumentPicker result:", result);
-
-    if (result.canceled) {
-      console.log("User cancelled file picker");
-      return;
-    }
+    const result = await DocumentPicker.getDocumentAsync({ type: "*/*", copyToCacheDirectory: true });
+    if (result.canceled) return;
 
     const file = result.assets[0];
-    if (!file) {
-      console.log("No file selected");
-      return;
-    }
+    if (!file || !userID || !currentUserID) return;
 
     const fileUri = file.uri;
     const fileName = file.name;
-    if (!fileUri || !userID || !currentUserID || !socket) {
-      console.log("Missing required data:", { fileUri, userID, currentUserID, socket });
-      return;
-    }
-
-    const fileInfo = await FileSystem.getInfoAsync(fileUri);
-    if (!fileInfo.exists) {
-      console.log("File does not exist:", fileUri);
-      Alert.alert("Lỗi", "File không tồn tại. Vui lòng thử lại.");
-      return;
-    }
-
     const messageID = `${socket.id}-${Date.now()}`;
     const tempMessage: Message = {
       senderID: currentUserID,
@@ -723,7 +576,6 @@ export default function Chat() {
 
     try {
       const fileBase64 = await convertFileToBase64(fileUri);
-
       const newMessage: Message = {
         senderID: currentUserID,
         receiverID: userID,
@@ -732,26 +584,19 @@ export default function Chat() {
         messageID,
         createdAt: new Date().toISOString(),
         seenStatus: [],
-        file: {
-          name: fileName,
-          data: fileBase64,
-        },
+        file: { name: fileName, data: fileBase64 },
       };
 
       socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
         console.log("Server response for file:", response);
         if (response !== "Đã nhận") {
-          setMessages((prev) =>
-            prev.filter((msg) => (msg.messageID ? msg.messageID !== messageID : true))
-          );
+          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
           Alert.alert("Lỗi", "Không thể gửi file. Vui lòng thử lại.");
         }
       });
     } catch (error) {
       console.error("Lỗi khi gửi file:", error);
-      setMessages((prev) =>
-        prev.filter((msg) => (msg.messageID ? msg.messageID !== messageID : true))
-      );
+      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
       Alert.alert("Lỗi", "Không thể gửi file. Vui lòng thử lại.");
     }
   };
@@ -763,11 +608,9 @@ export default function Chat() {
   }, [messages]);
 
   const renderItem = useCallback(
-    ({ item, index }: { item: Message; index: number }) => {
-      const contextPreview = item.context ? item.context.substring(0, 50) : "Tin nhắn trống";
-      console.log(`Rendering message: type=${item.messageTypeID}, context=${contextPreview}...`);
-      return <MessageItem item={item} currentUserID={currentUserID} userID={userID} />;
-    },
+    ({ item }: { item: Message }) => (
+      <MessageItem item={item} currentUserID={currentUserID} userID={userID} />
+    ),
     [currentUserID, userID]
   );
 
@@ -781,15 +624,7 @@ export default function Chat() {
 
   return (
     <View style={styles.container}>
-      <View
-        style={[
-          styles.navbar,
-          {
-            paddingTop: Platform.OS === "ios" ? insets.top : 3,
-            paddingBottom: 8,
-          },
-        ]}
-      >
+      <View style={[styles.navbar, { paddingTop: Platform.OS === "ios" ? insets.top : 3, paddingBottom: 8 }]}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -836,12 +671,7 @@ export default function Chat() {
         </TouchableOpacity>
       </View>
 
-      <Modal
-        visible={showStickerPicker}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowStickerPicker(false)}
-      >
+      <Modal visible={showStickerPicker} animationType="slide" transparent={true} onRequestClose={() => setShowStickerPicker(false)}>
         <View style={styles.modalContainer}>
           <View style={styles.stickerPicker}>
             <TextInput
@@ -860,15 +690,11 @@ export default function Chat() {
                     source={{ uri: item.images.original.url }}
                     style={styles.stickerThumbnail}
                     resizeMode="contain"
-                    onError={(e) => console.log("Error loading sticker thumbnail:", e.nativeEvent.error)}
                   />
                 </Pressable>
               )}
             />
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={() => setShowStickerPicker(false)}
-            >
+            <TouchableOpacity style={styles.closeButton} onPress={() => setShowStickerPicker(false)}>
               <Text style={styles.closeButtonText}>Đóng</Text>
             </TouchableOpacity>
           </View>
@@ -888,12 +714,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
   },
   username: { flex: 1, color: "#fff", fontSize: 18, fontWeight: "bold", marginLeft: 10 },
-  messageContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginVertical: 5,
-    paddingHorizontal: 10,
-  },
+  messageContainer: { flexDirection: "row", alignItems: "center", marginVertical: 5, paddingHorizontal: 10 },
   myMessage: { justifyContent: "flex-end", alignSelf: "flex-end" },
   otherMessage: { justifyContent: "flex-start", alignSelf: "flex-start" },
   avatar: { width: 40, height: 40, borderRadius: 20, marginRight: 10 },
@@ -918,32 +739,10 @@ const styles = StyleSheet.create({
   },
   input: { flex: 1, fontSize: 16, marginHorizontal: 10 },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-  modalContainer: {
-    flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(0,0,0,0.5)",
-  },
-  stickerPicker: {
-    backgroundColor: "#fff",
-    height: "50%",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-  },
-  stickerSearchInput: {
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 10,
-  },
+  modalContainer: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.5)" },
+  stickerPicker: { backgroundColor: "#fff", height: "50%", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
+  stickerSearchInput: { borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 10, marginBottom: 10 },
   stickerThumbnail: { width: 80, height: 80, margin: 5 },
-  closeButton: {
-    backgroundColor: "#007AFF",
-    padding: 10,
-    borderRadius: 10,
-    alignItems: "center",
-    marginTop: 10,
-  },
+  closeButton: { backgroundColor: "#007AFF", padding: 10, borderRadius: 10, alignItems: "center", marginTop: 10 },
   closeButtonText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
 });

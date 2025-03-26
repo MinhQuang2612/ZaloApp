@@ -11,14 +11,13 @@ import {
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
-import { getCurrentUser } from "../services/auth";
+import { getCurrentUser, logoutUser } from "../services/auth";
 import Footer from "../components/Footer";
-import { logoutUser } from "../services/auth";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { disconnectSocket } from "../services/socket"; // Import disconnectSocket
 
-// Cập nhật interface User để khớp với dữ liệu từ API
 interface User {
-  userID: string; // Thay _id bằng userID
+  userID: string;
   phoneNumber: string;
   username: string;
   DOB: string;
@@ -28,7 +27,7 @@ export default function Profile() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [twoFactorAuth, setTwoFactorAuth] = useState<boolean>(true); // Trạng thái bảo mật 2 lớp
+  const [twoFactorAuth, setTwoFactorAuth] = useState<boolean>(true);
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
@@ -37,13 +36,19 @@ export default function Profile() {
       if (!userData) {
         router.replace("/login");
       } else {
-        setUser(userData); // userData đã khớp với interface User
+        setUser(userData);
       }
       setLoading(false);
     };
 
     fetchUser();
   }, []);
+
+  const handleLogout = async () => {
+    await logoutUser();
+    disconnectSocket(); // Ngắt kết nối socket khi đăng xuất
+    router.replace("/login");
+  };
 
   if (loading) {
     return (
@@ -54,15 +59,7 @@ export default function Profile() {
   }
 
   return (
-    <View
-      style={[
-        styles.container,
-        {
-          paddingTop: Platform.OS === "ios" ? insets.top : 3,
-          paddingBottom: 8,
-        },
-      ]}
-    >
+    <View style={[styles.container, { paddingTop: Platform.OS === "ios" ? insets.top : 3, paddingBottom: 8 }]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
@@ -70,7 +67,6 @@ export default function Profile() {
         <Text style={styles.title}>Tài khoản và bảo mật</Text>
       </View>
 
-      {/* Thông tin tài khoản */}
       <Text style={styles.sectionTitle}>Tài khoản</Text>
       <TouchableOpacity style={styles.card} onPress={() => router.push("/profile_details")}>
         <View style={styles.row}>
@@ -100,7 +96,6 @@ export default function Profile() {
         <Text style={styles.itemText}>Mã QR của tôi</Text>
       </TouchableOpacity>
 
-      {/* Đăng nhập */}
       <Text style={styles.sectionTitle}>Đăng nhập</Text>
 
       <TouchableOpacity style={styles.item}>
@@ -127,21 +122,12 @@ export default function Profile() {
         <Text style={[styles.itemText, { color: "red" }]}>Xóa tài khoản</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[styles.item, { borderBottomWidth: 0 }]}
-        onPress={async () => {
-          await logoutUser();
-          router.replace("/login");
-        }}
-      >
+      <TouchableOpacity style={[styles.item, { borderBottomWidth: 0 }]} onPress={handleLogout}>
         <Ionicons name="log-out-outline" size={22} color="red" />
         <Text style={[styles.itemText, { color: "red" }]}>Đăng xuất</Text>
       </TouchableOpacity>
 
-      {/* Spacer để đẩy Footer xuống dưới */}
       <View style={styles.spacer} />
-
-      {/* Footer */}
       <Footer />
     </View>
   );

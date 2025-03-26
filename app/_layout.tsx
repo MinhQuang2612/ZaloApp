@@ -13,7 +13,7 @@ export default function RootLayout() {
       <Stack.Screen name="profile" options={{ headerShown: false }} />
       <Stack.Screen name="profile_details" options={{ headerShown: false }} />
       <Stack.Screen name="change_password" options={{ headerShown: false }} />
-      <Stack.Screen name="chat" options={{ headerShown: false }} />
+      <Stack.Screen name="single_chat" options={{ headerShown: false }} />
       <Stack.Screen name="contacts" options={{ headerShown: false }} />
       <Stack.Screen name="explore" options={{headerShown: false}}/>
       <Stack.Screen name="journal" options={{headerShown: false}}/>

@@ -10,13 +10,12 @@ import {
   RefreshControl,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { io, Socket } from "socket.io-client";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import { fetchMessages, Message } from "../services/message";
 import { fetchContacts, Contact } from "../services/contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getAccessToken } from "../services/auth"; // Import hàm getAccessToken
+import socket, { connectSocket } from "../services/socket";
 
 type HomeMessage = {
   senderID: string;
@@ -33,7 +32,6 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentUserID, setCurrentUserID] = useState<string | null>(null);
-  const [socket, setSocket] = useState<Socket | null>(null);
   const router = useRouter();
 
   const determineMessageType = (message: HomeMessage): string => {
@@ -61,7 +59,6 @@ export default function Home() {
     }
   };
 
-  // Hàm chọn đường dẫn uploads dựa trên máy
   const getUploadsPath = (): string => {
     const machine = process.env.EXPO_PUBLIC_MACHINE || "MACHINE_1";
     if (machine === "MACHINE_1") {
@@ -74,6 +71,9 @@ export default function Home() {
 
   const convertFilePathToURL = (context: string): string => {
     const uploadsPath = getUploadsPath();
+    if (context && (context.startsWith("http://") || context.startsWith("https://"))) {
+      return context;
+    }
     if (context && context.startsWith(uploadsPath)) {
       const fileName = context.split("\\").pop();
       return `${process.env.EXPO_PUBLIC_API_URL}/uploads/${fileName}`;
@@ -106,7 +106,12 @@ export default function Home() {
 
         if (latestMessage && !seenMessageIDs.has(latestMessage.messageID!)) {
           seenMessageIDs.add(latestMessage.messageID!);
-          const updatedContext = convertFilePathToURL(latestMessage.context);
+          const updatedContext =
+            latestMessage.messageTypeID === "type2" ||
+            latestMessage.messageTypeID === "type3" ||
+            latestMessage.messageTypeID === "type5"
+              ? convertFilePathToURL(latestMessage.context)
+              : latestMessage.context;
           allMessages.push({
             senderID: latestMessage.senderID === userID ? latestMessage.receiverID : latestMessage.senderID,
             context: updatedContext,
@@ -128,7 +133,7 @@ export default function Home() {
   useEffect(() => {
     const initializeData = async () => {
       setLoading(true);
-
+  
       const userData = await AsyncStorage.getItem("user");
       if (!userData) {
         console.error("Không tìm thấy user trong AsyncStorage");
@@ -136,72 +141,33 @@ export default function Home() {
         setLoading(false);
         return;
       }
-
+  
       const user = JSON.parse(userData);
       const userID = user.userID;
-      if (!userID) {
-        console.error("userID không hợp lệ trong userData:", user);
-        router.replace("/login");
-        setLoading(false);
-        return;
-      }
       setCurrentUserID(userID);
-
+  
       await loadMessages(userID);
-
-      // Lấy accessToken từ AsyncStorage
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        console.error("Không tìm thấy accessToken, chuyển hướng về login");
-        router.replace("/login");
-        setLoading(false);
-        return;
-      }
-
-      const newSocket = io(process.env.EXPO_PUBLIC_API_URL, {
-        reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000,
-        timeout: 20000,
-        auth: {
-          token: accessToken, // Gửi accessToken để xác thực
-        },
+  
+      connectSocket();
+      socket.emit("joinUserRoom", userID);
+      console.log("Home.tsx: Joined room:", userID);
+  
+      socket.on("connect", () => {
+        console.log("Home.tsx: Socket connected:", socket.id);
+        socket.emit("joinUserRoom", userID);
       });
-      setSocket(newSocket);
-
-      const joinRooms = () => {
-        console.log("Joining room with userID:", userID);
-        newSocket.emit("joinUserRoom", userID);
-        console.log(`Joined room ${userID}`);
-      };
-
-      newSocket.on("connect", () => {
-        console.log("Socket connected:", newSocket.id);
-        joinRooms();
-      });
-
-      newSocket.on("reconnect", (attempt) => {
-        console.log("Socket reconnected after attempt:", attempt);
-        joinRooms();
-      });
-
-      newSocket.on("connect_error", (error) => {
-        console.error("Socket connection error:", error.message);
-        if (error.message === "Authentication error" || error.message === "Invalid token") {
-          router.replace("/login");
-        }
-      });
-
-      newSocket.on("reconnect_error", (error) => {
-        console.error("Socket reconnect error:", error.message);
-      });
-
-      newSocket.on("receiveMessage", (message: Message) => {
-        console.log("Home.tsx: Received new message via socket:", message);
+  
+      socket.on("receiveMessage", (message: Message) => {
+        console.log("Home.tsx: Received message:", message);
         if (message.receiverID === userID || message.senderID === userID) {
           setMessages((prev) => {
             const senderID = message.senderID === userID ? message.receiverID : message.senderID;
-            const updatedContext = convertFilePathToURL(message.context);
+            const updatedContext =
+              message.messageTypeID === "type2" ||
+              message.messageTypeID === "type3" ||
+              message.messageTypeID === "type5"
+                ? convertFilePathToURL(message.context)
+                : message.context;
             const newMessage: HomeMessage = {
               senderID,
               context: updatedContext,
@@ -210,59 +176,40 @@ export default function Home() {
               messageTypeID: message.messageTypeID,
               unread: message.receiverID === userID && !message.seenStatus?.includes(userID),
             };
-
-            console.log("Home.tsx: New message processed:", newMessage, "Unread:", newMessage.unread);
-
+  
             const existingIndex = prev.findIndex((msg) => msg.senderID === senderID);
-
             if (existingIndex >= 0) {
-              const updatedMessages = [...prev];
-              updatedMessages[existingIndex] = newMessage;
-              const sortedMessages = updatedMessages.sort(
-                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-              );
-              console.log("Home.tsx: Updated messages (replaced):", sortedMessages);
-              return sortedMessages;
-            } else {
-              const updatedMessages = [newMessage, ...prev].sort(
-                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-              );
-              console.log("Home.tsx: Updated messages (added):", updatedMessages);
-              return updatedMessages;
+              prev[existingIndex] = newMessage;
+              return [...prev].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
             }
+            return [newMessage, ...prev].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
           });
         }
       });
-
-      newSocket.on("updateSingleChatSeenStatus", (messageID: string) => {
-        console.log(`Home.tsx: Received updateSingleChatSeenStatus for messageID: ${messageID}`);
-        setMessages((prev) => {
-          const updatedMessages = prev.map((msg) =>
+  
+      socket.on("updateSingleChatSeenStatus", (messageID: string) => {
+        console.log("Home.tsx: Update seen status for messageID:", messageID);
+        setMessages((prev) =>
+          prev.map((msg) =>
             msg.messageID === messageID ? { ...msg, unread: false } : msg
-          );
-          console.log("Home.tsx: Updated messages after seen status:", updatedMessages);
-          return updatedMessages;
-        });
+          )
+        );
       });
-
-      newSocket.on("disconnect", (reason) => {
-        console.log("Socket disconnected:", reason);
+  
+      socket.on("disconnect", (reason) => {
+        console.log("Home.tsx: Socket disconnected:", reason);
       });
-
+  
       setLoading(false);
-
+  
       return () => {
-        newSocket.off("connect");
-        newSocket.off("reconnect");
-        newSocket.off("connect_error");
-        newSocket.off("reconnect_error");
-        newSocket.off("receiveMessage");
-        newSocket.off("updateSingleChatSeenStatus");
-        newSocket.off("disconnect");
-        newSocket.disconnect();
+        socket.off("connect");
+        socket.off("receiveMessage");
+        socket.off("updateSingleChatSeenStatus");
+        socket.off("disconnect");
       };
     };
-
+  
     initializeData();
   }, []);
 
@@ -287,14 +234,10 @@ export default function Home() {
     );
   }
 
-  const renderItem = ({
-    item,
-  }: {
-    item: { senderID: string; context: string; createdAt: string; messageID?: string; messageTypeID?: string; unread?: boolean };
-  }) => (
+  const renderItem = ({ item }: { item: HomeMessage }) => (
     <TouchableOpacity
       style={styles.item}
-      onPress={() => router.push({ pathname: "/chat", params: { userID: item.senderID } })}
+      onPress={() => router.push({ pathname: "/single_chat", params: { userID: item.senderID } })}
     >
       <Image source={{ uri: "https://randomuser.me/api/portraits/men/1.jpg" }} style={styles.avatar} />
       <View style={styles.messageContent}>
@@ -311,7 +254,6 @@ export default function Home() {
   return (
     <View style={styles.container}>
       <Navbar showSearch showQR showAdd addIconType="add" />
-
       {messages.length === 0 ? (
         <View style={[styles.emptyContainer, { zIndex: 500 }]}>
           <Text style={styles.emptyText}>Không có tin nhắn nào để hiển thị.</Text>
@@ -325,7 +267,6 @@ export default function Home() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         />
       )}
-
       <Footer />
     </View>
   );
