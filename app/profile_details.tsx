@@ -1,4 +1,3 @@
-// ProfileDetails.tsx
 import { useEffect, useState } from "react";
 import {
   View,
@@ -40,9 +39,9 @@ interface CustomDatePickerModalProps {
 // Ép kiểu DatePickerModal để sử dụng kiểu thủ công
 const CustomDatePickerModal = DatePickerModal as React.ComponentType<CustomDatePickerModalProps>;
 
-// Định nghĩa interface User khớp với dữ liệu từ API
+// Định nghĩa interface User khớp với dữ liệu từ auth.ts
 interface User {
-  _id: string;
+  userID: string; // Sửa _id thành userID
   username: string;
   phoneNumber: string;
   DOB: string;
@@ -82,13 +81,23 @@ export default function ProfileDetails() {
 
   useEffect(() => {
     const fetchUser = async () => {
-      const userData = await getCurrentUser();
-      if (!userData) {
-        router.replace("/login");
-      } else {
+      try {
+        setLoading(true);
+        const userData = await getCurrentUser();
+        console.log("ProfileDetails.tsx: Fetched userData:", userData);
+
+        if (!userData || !userData.userID || !userData.username || !userData.phoneNumber) {
+          console.error("ProfileDetails.tsx: Invalid userData:", userData);
+          Alert.alert("Lỗi", "Không thể lấy thông tin người dùng. Vui lòng đăng nhập lại.");
+          router.replace("/login");
+          return;
+        }
+
+        // Dữ liệu đã khớp với interface User, không cần ánh xạ thêm
         setUser(userData);
         setUsername(userData.username);
         setDisplayDob(formatDateForDisplay(userData.DOB));
+
         try {
           const date = new Date(userData.DOB);
           if (!isNaN(date.getTime())) {
@@ -100,15 +109,23 @@ export default function ProfileDetails() {
           console.error("Error parsing DOB for DateTimePicker:", error);
           setDob(new Date());
         }
+      } catch (error) {
+        console.error("ProfileDetails.tsx: Error fetching user:", error);
+        Alert.alert("Lỗi", "Đã có lỗi xảy ra khi lấy thông tin người dùng.");
+        router.replace("/login");
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     fetchUser();
   }, []);
 
   const handleSave = async () => {
-    if (!user) return;
+    if (!user) {
+      Alert.alert("Lỗi", "Không có thông tin người dùng để cập nhật.");
+      return;
+    }
 
     if (!username.trim()) {
       Alert.alert("Lỗi", "Tên không được để trống.");
@@ -122,21 +139,32 @@ export default function ProfileDetails() {
 
     try {
       const formattedDob = formatDateToApi(dob);
-      const updatedUser = await updateProfile(user._id, username, formattedDob);
-      
-      setUser({
-        ...user,
-        username: updatedUser.username,
-        DOB: updatedUser.DOB,
-      });
-      
-      setDisplayDob(formatDateForDisplay(updatedUser.DOB));
+      const updatedUser = await updateProfile(user.userID, username, formattedDob); // Sử dụng userID thay vì _id
+
+      // Cập nhật lại user với dữ liệu mới từ API
+      const formattedUpdatedUser: User = {
+        userID: updatedUser.userID,
+        username: updatedUser.username || user.username,
+        phoneNumber: updatedUser.phoneNumber || user.phoneNumber,
+        DOB: updatedUser.DOB || user.DOB,
+      };
+
+      setUser(formattedUpdatedUser);
+      setDisplayDob(formatDateForDisplay(formattedUpdatedUser.DOB));
       setIsEditing(false);
       Alert.alert("Thành công", "Thông tin cá nhân đã được cập nhật.");
     } catch (error: any) {
       Alert.alert("Lỗi", error.message || "Không thể cập nhật thông tin.");
     }
   };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
 
   return (
     <PaperProvider>
