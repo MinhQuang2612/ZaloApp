@@ -1,5 +1,9 @@
 import { io, Socket } from "socket.io-client";
+<<<<<<< HEAD
 import { getAccessToken, refreshAccessToken } from "../services/auth"; 
+=======
+import { getAccessToken, refreshAccessToken } from "../services/auth";
+>>>>>>> 20350c187f3d028ac37132d85d0ea87eb325b80a
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 console.log("(NOBRIDGE) LOG API URL:", API_URL);
@@ -68,14 +72,23 @@ socket.on("connect_error", async (error) => {
       socket.connect();
     } catch (refreshError) {
       console.error("(NOBRIDGE) ERROR Failed to refresh token:", refreshError);
+<<<<<<< HEAD
       // Có thể yêu cầu người dùng đăng nhập lại
       // Ví dụ: router.replace("/login");
+=======
+      // Optionally redirect to login screen
+      // router.replace("/login");
+>>>>>>> 20350c187f3d028ac37132d85d0ea87eb325b80a
     }
   }
 });
 
 socket.on("disconnect", (reason) => {
   console.log("(NOBRIDGE) LOG Socket disconnected:", reason);
+  if (reason === "io server disconnect" || reason === "io client disconnect") {
+    // Reconnect if the disconnection was initiated by the server or client
+    connectSocket();
+  }
 });
 
 export default socket;

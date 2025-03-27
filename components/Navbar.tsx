@@ -83,10 +83,15 @@ const Navbar: React.FC<NavbarProps> = ({ title, showSearch, showQR, showAdd, add
               <Ionicons name="person-add-outline" size={20} color="#000" />
               <Text style={styles.dropdownText}>Thêm bạn</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.dropdownItem}>
-              <Ionicons name="people-outline" size={20} color="#000" />
-              <Text style={styles.dropdownText}>Tạo nhóm</Text>
-            </TouchableOpacity>
+            <TouchableOpacity style={styles.dropdownItem}
+                onPress={() => {
+                setShowDropdown(false);
+                router.push("/create_group"); // Navigate to the group creation screen
+            }}
+              >
+  <Ionicons name="people-outline" size={20} color="#000" />
+  <Text style={styles.dropdownText}>Tạo nhóm</Text>
+</TouchableOpacity>
             <TouchableOpacity style={styles.dropdownItem}>
               <Ionicons name="cloud-outline" size={20} color="#000" />
               <Text style={styles.dropdownText}>Cloud của tôi</Text>
