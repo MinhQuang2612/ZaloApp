@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export interface Message {
   senderID: string;
-  receiverID: string;
+  receiverID?: string;
   messageTypeID: string;
   context: string;
   createdAt: string;
@@ -33,9 +33,21 @@ export const fetchMessages = async (receiverID: string): Promise<Message[]> => {
   }
 };
 
+export const fetchGroupMessages = async (groupID: string): Promise<Message[]> => {
+  try {
+    if (!groupID) throw new Error("Thiếu groupID.");
+
+    const response = await api.get(`/api/message/group/${groupID}`);
+    return response.data || [];
+  } catch (error: any) {
+    console.error("Lỗi khi lấy tin nhắn nhóm:", error.message);
+    return [];
+  }
+};
+
 export const sendMessage = async (message: {
   senderID: string;
-  receiverID: string;
+  receiverID?: string;
   context: string;
   messageTypeID: string;
   groupID?: string;
