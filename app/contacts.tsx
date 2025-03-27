@@ -39,7 +39,7 @@ export default function Contacts() {
     <TouchableOpacity
       style={styles.contactItem}
       onPress={() => router.push({
-        pathname: "/chat",
+        pathname: "/single_chat",
         params: { userID: item.userID }, // Truyền userID qua params
       })}
     >

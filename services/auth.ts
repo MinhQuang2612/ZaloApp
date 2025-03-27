@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import api from "./api";
+import { jwtDecode } from "jwt-decode";
 
 interface User {
   userID: string;
@@ -15,12 +16,15 @@ interface LoginResponse {
   refreshToken: string;
 }
 
+interface RefreshTokenResponse {
+  accessToken: string;
+  refreshToken: string;
+}
+
 // Hàm đăng nhập
 export const loginUser = async (phoneNumber: string, password: string): Promise<User> => {
   try {
-    // Gọi endpoint mới /api/auth/login
     const response = await api.post("/api/auth/login", { phoneNumber, password });
-
     console.log("Dữ liệu API trả về:", response.data);
 
     if (!response.data || typeof response.data !== "object" || !response.data.user) {
@@ -46,7 +50,8 @@ export const loginUser = async (phoneNumber: string, password: string): Promise<
     return user;
   } catch (error: any) {
     console.error("Lỗi khi đăng nhập:", error);
-    throw error.response?.data?.message || "Đăng nhập thất bại.";
+    const errorMessage = error.response?.data?.message || "Đăng nhập thất bại.";
+    throw new Error(errorMessage);
   }
 };
 
@@ -67,7 +72,7 @@ export const getCurrentUser = async (): Promise<User | null> => {
   }
 };
 
-// Lấy accessToken từ AsyncStorage
+// Lấy accessToken từ AsyncStorage và kiểm tra thời gian hết hạn
 export const getAccessToken = async (): Promise<string | null> => {
   try {
     const token = await AsyncStorage.getItem("accessToken");
@@ -75,6 +80,15 @@ export const getAccessToken = async (): Promise<string | null> => {
       console.log("Không tìm thấy accessToken trong AsyncStorage");
       return null;
     }
+
+    // Giải mã token để kiểm tra thời gian hết hạn
+    const decoded: any = jwtDecode(token);
+    const currentTime = Date.now() / 1000; // Thời gian hiện tại (giây)
+    if (decoded.exp < currentTime) {
+      console.log("Access token đã hết hạn, cần làm mới");
+      return null; // Token hết hạn, trả về null để kích hoạt làm mới
+    }
+
     return token;
   } catch (error) {
     console.error("Lỗi khi lấy accessToken từ AsyncStorage:", error);
@@ -97,17 +111,42 @@ export const getRefreshToken = async (): Promise<string | null> => {
   }
 };
 
+// Hàm làm mới token
+export const refreshAccessToken = async (): Promise<RefreshTokenResponse | null> => {
+  try {
+    const refreshToken = await getRefreshToken();
+    if (!refreshToken) {
+      console.log("Không tìm thấy refreshToken để làm mới");
+      return null;
+    }
+
+    const response = await api.post("/api/auth/refreshToken", { refreshToken });
+    const { accessToken: newAccessToken, refreshToken: newRefreshToken } = response.data;
+
+    // Lưu token mới vào AsyncStorage
+    await AsyncStorage.setItem("accessToken", newAccessToken);
+    await AsyncStorage.setItem("refreshToken", newRefreshToken);
+    console.log("Đã làm mới token:", { newAccessToken, newRefreshToken });
+
+    return { accessToken: newAccessToken, refreshToken: newRefreshToken };
+  } catch (error: any) {
+    console.error("Lỗi khi làm mới token:", error);
+    const errorMessage = error.response?.data?.message || "Không thể làm mới token.";
+    throw new Error(errorMessage);
+  }
+};
+
 // Hàm đăng xuất
-export const logoutUser = async () => {
+export const logoutUser = async (): Promise<void> => {
   try {
     const refreshToken = await getRefreshToken();
     if (refreshToken) {
-      // Gọi API logout để xóa refreshToken trên server
       await api.post("/api/auth/logout", { refreshToken });
       console.log("Đã gọi API logout để xóa refreshToken trên server");
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error("Lỗi khi gọi API logout:", error);
+    throw new Error(error.response?.data?.message || "Không thể đăng xuất trên server.");
   } finally {
     // Xóa dữ liệu cục bộ
     await AsyncStorage.removeItem("user");
