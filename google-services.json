@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "820060434671",
-    "project_id": "zaloapp-133bc",
-    "storage_bucket": "zaloapp-133bc.firebasestorage.app"
+    "project_number": "${GCM_SENDER_ID}",
+    "project_id": "${PROJECT_ID}",
+    "storage_bucket": "${STORAGE_BUCKET}"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:820060434671:android:b6d02bd004163d608b6b1a",
+        "mobilesdk_app_id": "1:${GCM_SENDER_ID}:android:b6d02bd004163d608b6b1a",
         "android_client_info": {
           "package_name": "com.zalo_app"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCvVUyD2N4U9Te10dGIjL3cAukzzN1yNfA"
+          "current_key": "${FIREBASE_API_KEY}"
         }
       ],
       "services": {
