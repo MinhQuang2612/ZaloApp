@@ -4,26 +4,43 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
+  Alert,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useState, useEffect, useRef } from "react";
-import { Ionicons } from "@expo/vector-icons"; // Import icon
+import { Ionicons } from "@expo/vector-icons";
+import { getAuth, signInWithPhoneNumber } from "firebase/auth";
+
+// Lấy auth trực tiếp mà không cần initializeApp thủ công
+const auth = getAuth();
 
 export default function RegisterOTP() {
   const router = useRouter();
   const { phone } = useLocalSearchParams(); // Nhận số điện thoại từ query params
-  const [otp, setOtp] = useState(["", "", "", ""]);
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]); // Hỗ trợ 6 chữ số
   const [timer, setTimer] = useState(60);
   const [resendDisabled, setResendDisabled] = useState(true);
+  const [confirmation, setConfirmation] = useState<any>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
 
-  // Tạo ref để điều hướng giữa các ô nhập OTP
+  // Tạo ref để điều hướng giữa các ô nhập OTP (6 ô)
   const otpRefs = [
+    useRef<TextInput>(null),
+    useRef<TextInput>(null),
     useRef<TextInput>(null),
     useRef<TextInput>(null),
     useRef<TextInput>(null),
     useRef<TextInput>(null),
   ];
 
+  // Gửi OTP khi component được mount
+  useEffect(() => {
+    if (phone) {
+      sendOtp();
+    }
+  }, [phone]);
+
+  // Đếm ngược thời gian để gửi lại mã
   useEffect(() => {
     let countdown = setInterval(() => {
       setTimer((prev) => {
@@ -38,6 +55,48 @@ export default function RegisterOTP() {
     return () => clearInterval(countdown);
   }, [resendDisabled]);
 
+  // Hàm gửi OTP
+  const sendOtp = async () => {
+    try {
+      // Tự động thêm mã quốc gia +84 khi gửi OTP
+      const phoneNumber = `+84${phone}`;
+      // Trên mobile, Firebase tự động xử lý reCAPTCHA, nên không cần verifier
+      const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber);
+      setConfirmation(confirmationResult);
+      Alert.alert("Thành công", "Mã OTP đã được gửi đến số điện thoại của bạn!");
+    } catch (error) {
+      console.error("Lỗi khi gửi OTP:", error);
+      Alert.alert("Lỗi", "Không thể gửi mã OTP. Vui lòng thử lại!");
+    }
+  };
+
+  // Hàm xác thực OTP
+  const verifyOtp = async () => {
+    if (!confirmation) {
+      Alert.alert("Lỗi", "Không có mã xác thực. Vui lòng gửi lại OTP!");
+      return;
+    }
+
+    const otpCode = otp.join("");
+    if (otpCode.length !== 6) {
+      Alert.alert("Lỗi", "Vui lòng nhập đầy đủ mã OTP (6 chữ số)!");
+      return;
+    }
+
+    setIsVerifying(true);
+    try {
+      await confirmation.confirm(otpCode);
+      Alert.alert("Thành công", "Xác thực OTP thành công!");
+      // Chuyển đến màn hình Register với số điện thoại đã xác thực
+      router.push({ pathname: "/register", params: { phone } });
+    } catch (error) {
+      console.error("Lỗi khi xác thực OTP:", error);
+      Alert.alert("Lỗi", "Mã OTP không đúng. Vui lòng thử lại!");
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   const handleOtpChange = (value: string, index: number) => {
     if (/^\d$/.test(value) || value === "") {
       let newOtp = [...otp];
@@ -45,7 +104,7 @@ export default function RegisterOTP() {
       setOtp(newOtp);
 
       // Nếu nhập xong thì tự động nhảy sang ô tiếp theo
-      if (value !== "" && index < 3) {
+      if (value !== "" && index < 5) {
         otpRefs[index + 1].current?.focus();
       }
 
@@ -75,12 +134,13 @@ export default function RegisterOTP() {
         </Text>
       </View>
 
+      {/* Hiển thị số điện thoại không có mã quốc gia */}
       <Text style={styles.callingText}>
-        Tin nhắn được gửi đến số {phone ? `(+84) ${phone}` : "(+84) XXX XXX XXX"}
+        Tin nhắn được gửi đến số {phone || "XXX XXX XXX"}
       </Text>
-      <Text style={styles.callingSubText}>Vui lòng nhập mã vào ô bên dưới</Text>
+      <Text style={styles.callingSubText}>Vui lòng nhập mã 6 chữ số vào ô bên dưới</Text>
 
-      {/* OTP Input */}
+      {/* OTP Input (6 ô) */}
       <View style={styles.otpContainer}>
         {otp.map((digit, index) => (
           <TextInput
@@ -102,6 +162,7 @@ export default function RegisterOTP() {
           onPress={() => {
             setResendDisabled(true);
             setTimer(60);
+            sendOtp();
           }}
         >
           <Text
@@ -117,13 +178,13 @@ export default function RegisterOTP() {
       </View>
 
       <TouchableOpacity
-        style={styles.button}
-        onPress={() => {
-          // Chuyển đến màn hình "create_account" và truyền số điện thoại đã xác thực
-          router.push({ pathname: "/create_account", params: { phone } });
-        }}
+        style={[styles.button, isVerifying && styles.buttonDisabled]}
+        onPress={verifyOtp}
+        disabled={isVerifying}
       >
-        <Text style={styles.buttonText}>Tiếp tục</Text>
+        <Text style={styles.buttonText}>
+          {isVerifying ? "Đang xác thực..." : "Tiếp tục"}
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -180,13 +241,13 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   otpBox: {
-    width: 50,
+    width: 40,
     height: 50,
     borderWidth: 2,
     borderColor: "#007AFF",
     textAlign: "center",
     fontSize: 18,
-    marginHorizontal: 8,
+    marginHorizontal: 5,
     borderRadius: 8,
   },
   resendContainer: {
@@ -213,6 +274,9 @@ const styles = StyleSheet.create({
     marginTop: 10,
     width: "75%",
     alignSelf: "center",
+  },
+  buttonDisabled: {
+    backgroundColor: "#ccc",
   },
   buttonText: {
     color: "#fff",
