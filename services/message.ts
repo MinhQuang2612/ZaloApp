@@ -14,6 +14,8 @@ export interface Message {
     name: string;
     data: string; // Base64 string
   };
+  deleteStatus?: boolean;
+  recallStatus?: boolean;
 }
 
 export const fetchMessages = async (receiverID: string): Promise<Message[]> => {
@@ -26,7 +28,7 @@ export const fetchMessages = async (receiverID: string): Promise<Message[]> => {
     if (!userID1 || !receiverID) throw new Error("Thiếu userID hoặc receiverID.");
 
     const response = await api.get(`/api/message/${userID1}/${receiverID}`);
-    return response.data || [];
+    return response.data.filter((msg: Message) => !msg.deleteStatus && !msg.recallStatus) || [];
   } catch (error: any) {
     console.error("Lỗi khi lấy tin nhắn:", error.message);
     return [];
@@ -38,7 +40,7 @@ export const fetchGroupMessages = async (groupID: string): Promise<Message[]> =>
     if (!groupID) throw new Error("Thiếu groupID.");
 
     const response = await api.get(`/api/message/group/${groupID}`);
-    return response.data || [];
+    return response.data.filter((msg: Message) => !msg.deleteStatus && !msg.recallStatus) || [];
   } catch (error: any) {
     console.error("Lỗi khi lấy tin nhắn nhóm:", error.message);
     return [];

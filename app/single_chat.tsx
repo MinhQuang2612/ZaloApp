@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -24,7 +24,7 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import { Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import socket, { connectSocket } from "../services/socket";
+import socket, { connectSocket, deleteMessage, recallMessage, registerSocketListeners, removeSocketListeners } from "../services/socket";
 
 type SocketResponse =
   | "đang gửi"
@@ -34,6 +34,8 @@ type SocketResponse =
   | "User đã tồn tại trong seenStatus"
   | "Đã cập nhật seenStatus chat đơn"
   | "Đã cập nhật seenStatus chat nhóm"
+  | "Xóa tin nhắn thành công"
+  | "Thu hồi tin nhắn thành công"
   | string;
 
 type GiphySticker = {
@@ -49,14 +51,19 @@ const MessageItem = ({
   item,
   currentUserID,
   userID,
+  onDeleteMessage,
+  onRecallMessage,
 }: {
   item: Message;
   currentUserID: string | null;
   userID: string | undefined;
+  onDeleteMessage: (messageID: string) => void;
+  onRecallMessage: (messageID: string) => void;
 }) => {
   const effectiveType = determineMessageType(item);
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showMessageOptions, setShowMessageOptions] = useState(false);
 
   useEffect(() => {
     if (effectiveType === "type3" && item.context !== "Đang tải...") {
@@ -71,83 +78,143 @@ const MessageItem = ({
     });
   };
 
+  const handleLongPress = () => {
+    if (item.senderID === currentUserID && !item.recallStatus) {
+      setShowMessageOptions(true);
+    }
+  };
+
   return (
-    <View
-      style={[
-        styles.messageContainer,
-        item.senderID === currentUserID ? styles.myMessage : styles.otherMessage,
-      ]}
+    <TouchableOpacity
+      onLongPress={handleLongPress}
+      delayLongPress={500}
+      activeOpacity={0.7}
     >
-      {item.senderID !== currentUserID && (
-        <Image
-          source={{ uri: "https://randomuser.me/api/portraits/men/1.jpg" }}
-          style={styles.avatar}
-          onError={(e) => console.log("Error loading avatar:", e.nativeEvent.error)}
-        />
-      )}
-      <View style={styles.messageBox}>
-        {effectiveType === "type1" && <Text style={styles.messageText}>{item.context || "Tin nhắn trống"}</Text>}
-        {effectiveType === "type2" && (
-          item.context === "Đang tải..." ? (
-            <Text style={styles.loadingText}>Đang tải...</Text>
-          ) : (
-            <Image
-              source={{ uri: item.context || "https://via.placeholder.com/200" }}
-              style={styles.image}
-              resizeMode="cover"
-              onError={(e) => console.log("Error loading image:", e.nativeEvent.error)}
-            />
-          )
-        )}
-        {effectiveType === "type3" && (
-          <View style={styles.videoContainer}>
-            {error ? (
-              <Text style={{ color: "red" }}>{error}</Text>
-            ) : videoUri ? (
-              <Video
-                source={{ uri: videoUri }}
-                style={styles.video}
-                useNativeControls
-                onError={(e: any) => {
-                  console.log("Error loading video:", e);
-                  setError("Không thể phát video");
-                }}
-                onLoad={() => console.log("Video loaded successfully")}
-              />
-            ) : (
-              <Text>Đang tải video...</Text>
-            )}
-          </View>
-        )}
-        {effectiveType === "type4" && (
+      <View
+        style={[
+          styles.messageContainer,
+          item.senderID === currentUserID ? styles.myMessage : styles.otherMessage,
+        ]}
+      >
+        {item.senderID !== currentUserID && (
           <Image
-            source={{ uri: item.context || "https://via.placeholder.com/100" }}
-            style={styles.sticker}
-            resizeMode="contain"
-            onError={(e) => console.log("Error loading sticker:", e.nativeEvent.error)}
+            source={{ uri: "https://randomuser.me/api/portraits/men/1.jpg" }}
+            style={styles.avatar}
+            onError={(e) => console.log("Error loading avatar:", e.nativeEvent.error)}
           />
         )}
-        {effectiveType === "type5" && (
-          item.context === "Đang tải..." ? (
-            <Text style={styles.loadingText}>Đang tải...</Text>
+        <View style={styles.messageBox}>
+          {item.recallStatus ? (
+            <Text style={styles.recalledMessage}>Tin nhắn đã được thu hồi</Text>
+          ) : item.deleteStatus && item.senderID === currentUserID ? (
+            <Text style={styles.recalledMessage}>Tin nhắn đã bị xóa</Text>
           ) : (
-            <TouchableOpacity onPress={() => handleFilePress(item.context || "")}>
-              <View style={styles.fileContainer}>
-                <Ionicons name="document-outline" size={24} color="#007AFF" />
-                <Text style={styles.fileText}>
-                  File: {(item.context || "file").split("/").pop() || "Không xác định"}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          )
-        )}
-        {item.senderID === currentUserID && (
-          <Text style={styles.seenText}>
-            {item.seenStatus?.includes(userID!) ? "Đã xem" : "Đã gửi"}
-          </Text>
-        )}
+            <>
+              {effectiveType === "type1" && (
+                <Text style={styles.messageText}>{item.context || "Tin nhắn trống"}</Text>
+              )}
+              {effectiveType === "type2" && (
+                item.context === "Đang tải..." ? (
+                  <Text style={styles.loadingText}>Đang tải...</Text>
+                ) : (
+                  <Image
+                    source={{ uri: item.context || "https://via.placeholder.com/200" }}
+                    style={styles.image}
+                    resizeMode="cover"
+                    onError={(e) => console.log("Error loading image:", e.nativeEvent.error)}
+                  />
+                )
+              )}
+              {effectiveType === "type3" && (
+                <View style={styles.videoContainer}>
+                  {error ? (
+                    <Text style={{ color: "red" }}>{error}</Text>
+                  ) : videoUri ? (
+                    <Video
+                      source={{ uri: videoUri }}
+                      style={styles.video}
+                      useNativeControls
+                      onError={(e: any) => {
+                        console.log("Error loading video:", e);
+                        setError("Không thể phát video");
+                      }}
+                      onLoad={() => console.log("Video loaded successfully")}
+                    />
+                  ) : (
+                    <Text>Đang tải video...</Text>
+                  )}
+                </View>
+              )}
+              {effectiveType === "type4" && (
+                <Image
+                  source={{ uri: item.context || "https://via.placeholder.com/100" }}
+                  style={styles.sticker}
+                  resizeMode="contain"
+                  onError={(e) => console.log("Error loading sticker:", e.nativeEvent.error)}
+                />
+              )}
+              {effectiveType === "type5" && (
+                item.context === "Đang tải..." ? (
+                  <Text style={styles.loadingText}>Đang tải...</Text>
+                ) : (
+                  <TouchableOpacity onPress={() => handleFilePress(item.context || "")}>
+                    <View style={styles.fileContainer}>
+                      <Ionicons name="document-outline" size={24} color="#007AFF" />
+                      <Text style={styles.fileText}>
+                        File: {(item.context || "file").split("/").pop() || "Không xác định"}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                )
+              )}
+            </>
+          )}
+          {item.senderID === currentUserID && !item.recallStatus && (
+            <Text style={styles.seenText}>
+              {item.seenStatus?.includes(userID!) ? "Đã xem" : "Đã gửi"}
+            </Text>
+          )}
+        </View>
       </View>
-    </View>
+
+      {showMessageOptions && (
+        <Modal
+          visible={showMessageOptions}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowMessageOptions(false)}
+        >
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setShowMessageOptions(false)}
+          >
+            <View style={styles.messageOptionsContainer}>
+              <TouchableOpacity
+                style={styles.optionButton}
+                onPress={() => {
+                  onDeleteMessage(item.messageID!);
+                  setShowMessageOptions(false);
+                }}
+              >
+                <Ionicons name="trash-outline" size={24} color="#FF3B30" />
+                <Text style={[styles.optionText, { color: "#FF3B30" }]}>Xóa tin nhắn</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.optionButton}
+                onPress={() => {
+                  onRecallMessage(item.messageID!);
+                  setShowMessageOptions(false);
+                }}
+              >
+                <Ionicons name="refresh-outline" size={24} color="#007AFF" />
+                <Text style={styles.optionText}>Thu hồi tin nhắn</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
+    </TouchableOpacity>
   );
 };
 
@@ -157,7 +224,6 @@ const determineMessageType = (message: Message): string => {
 
 const getMessagePreview = (message: Message): string => {
   const effectiveType = determineMessageType(message);
-
   switch (effectiveType) {
     case "type1":
       return message.context.length > 50
@@ -232,10 +298,84 @@ export default function Chat() {
     return context;
   };
 
+  const setupSocketListeners = useCallback(() => {
+    const listeners = [
+      {
+        event: "receiveMessage",
+        handler: (message: Message) => {
+          console.log("Chat.tsx: Received message:", message);
+          if (
+            (message.senderID === userID && message.receiverID === currentUserID) ||
+            (message.senderID === currentUserID && message.receiverID === userID)
+          ) {
+            setMessages((prev) => {
+              const exists = prev.some((msg) => msg.messageID === message.messageID);
+              if (!exists) {
+                if (
+                  message.messageTypeID === "type2" ||
+                  message.messageTypeID === "type3" ||
+                  message.messageTypeID === "type5"
+                ) {
+                  message.context = convertFilePathToURL(message.context);
+                }
+                const newMessages = [...prev, message];
+                setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+                return newMessages;
+              }
+              return prev;
+            });
+          }
+        },
+      },
+      {
+        event: "updateSingleChatSeenStatus",
+        handler: (messageID: string) => {
+          console.log("Chat.tsx: Received updateSingleChatSeenStatus for messageID:", messageID);
+          setMessages((prev) => {
+            const updatedMessages = prev.map((msg) =>
+              msg.messageID === messageID
+                ? { ...msg, seenStatus: [...(msg.seenStatus || []), userID!], unread: false }
+                : msg
+            );
+            console.log("Chat.tsx: Updated messages:", updatedMessages);
+            return [...updatedMessages];
+          });
+        },
+      },
+      {
+        event: "disconnect",
+        handler: (reason: string) => {
+          console.log("Chat.tsx: Socket disconnected:", reason);
+        },
+      },
+    ];
+  
+    registerSocketListeners(listeners);
+  
+    socket.on("connect", () => {
+      console.log("Chat.tsx: Socket connected:", socket.id);
+      socket.emit("joinUserRoom", currentUserID);
+      socket.emit("joinUserRoom", userID);
+      console.log("Chat.tsx: Joined rooms:", currentUserID, userID);
+      registerSocketListeners(listeners);
+    });
+  
+    return () => {
+      removeSocketListeners([
+        "connect",
+        "receiveMessage",
+        "updateSingleChatSeenStatus",
+        "deletedSingleMessage",
+        "recalledSingleMessage",
+        "disconnect",
+      ]);
+    };
+  }, [currentUserID, userID]);
+
   useEffect(() => {
     const initializeSocketAndData = async () => {
       setLoading(true);
-  
+
       const userData = await AsyncStorage.getItem("user");
       if (!userData) {
         console.error("Không tìm thấy user trong AsyncStorage");
@@ -243,7 +383,7 @@ export default function Chat() {
         setLoading(false);
         return;
       }
-  
+
       const user = JSON.parse(userData);
       const userIDValue = user.userID;
       if (!userIDValue) {
@@ -253,24 +393,28 @@ export default function Chat() {
         return;
       }
       setCurrentUserID(userIDValue);
-  
+
       if (!userID) {
         console.error("userID không hợp lệ:", userID);
         setLoading(false);
         return;
       }
-  
+
       try {
         const receiverData = await fetchUserByID(userID);
         setReceiverName(receiverData?.username || "Người dùng chưa xác định");
       } catch (error) {
         console.error("Lỗi khi lấy thông tin người dùng:", error);
       }
-  
+
       try {
         const data = await fetchMessages(userID);
         const updatedData = data.map((message) => {
-          if (message.messageTypeID === "type2" || message.messageTypeID === "type3" || message.messageTypeID === "type5") {
+          if (
+            message.messageTypeID === "type2" ||
+            message.messageTypeID === "type3" ||
+            message.messageTypeID === "type5"
+          ) {
             message.context = convertFilePathToURL(message.context);
           }
           return message;
@@ -279,67 +423,21 @@ export default function Chat() {
       } catch (error) {
         console.error("Lỗi khi lấy tin nhắn ban đầu:", error);
       }
-  
-      // Đảm bảo socket kết nối và join room
-      connectSocket();
+
+      await connectSocket();
       socket.emit("joinUserRoom", userIDValue);
       socket.emit("joinUserRoom", userID);
       console.log("Chat.tsx: Joined rooms:", userIDValue, userID);
-  
-      socket.on("connect", () => {
-        console.log("Chat.tsx: Socket connected:", socket.id);
-        socket.emit("joinUserRoom", userIDValue);
-        socket.emit("joinUserRoom", userID);
-      });
-  
-      socket.on("receiveMessage", (message: Message) => {
-        console.log("Chat.tsx: Received message:", message);
-        if (
-          (message.senderID === userID && message.receiverID === userIDValue) ||
-          (message.senderID === userIDValue && message.receiverID === userID)
-        ) {
-          setMessages((prev) => {
-            const exists = prev.some((msg) => msg.messageID === message.messageID);
-            if (!exists) {
-              if (message.messageTypeID === "type2" || message.messageTypeID === "type3" || message.messageTypeID === "type5") {
-                message.context = convertFilePathToURL(message.context);
-              }
-              return [...prev, message];
-            }
-            return prev;
-          });
-          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-        }
-      });
-  
-      socket.on("updateSingleChatSeenStatus", (messageID: string) => {
-        console.log("Chat.tsx: Update seen status for messageID:", messageID);
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.messageID === messageID
-              ? { ...msg, seenStatus: [...(msg.seenStatus || []), userID!], unread: false }
-              : msg
-          )
-        );
-      });
-  
-      socket.on("disconnect", (reason) => {
-        console.log("Chat.tsx: Socket disconnected:", reason);
-      });
-  
+
       setLoading(false);
-  
-      return () => {
-        socket.off("connect");
-        socket.off("receiveMessage");
-        socket.off("updateSingleChatSeenStatus");
-        socket.off("disconnect");
-      };
     };
-  
+
     initializeSocketAndData();
-  }, [userID]);
-  
+    const cleanup = setupSocketListeners();
+
+    return cleanup;
+  }, [userID, setupSocketListeners]);
+
   useEffect(() => {
     if (currentUserID && messages.length > 0) {
       const unreadMessages = messages.filter(
@@ -363,10 +461,13 @@ export default function Chat() {
   }, [messages, currentUserID]);
 
   const handleSendMessage = async () => {
-    if (!inputText.trim() || !userID || !currentUserID) return;
-
+    if (!inputText.trim() || !userID || !currentUserID) {
+      console.log("Input invalid:", { inputText, userID, currentUserID });
+      return;
+    }
+  
     const messageID = `${socket.id}-${Date.now()}`;
-    const newMessage: Message = {
+    const newMessage = {
       senderID: currentUserID,
       receiverID: userID,
       messageTypeID: "type1",
@@ -375,17 +476,41 @@ export default function Chat() {
       createdAt: new Date().toISOString(),
       seenStatus: [],
     };
-
+  
+    console.log("Sending message:", newMessage);
     setMessages((prev) => [...prev, newMessage]);
     setInputText("");
-
+  
     socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
       console.log("Server response for text message:", response);
       if (response !== "Đã nhận") {
+        console.log("Message failed, response:", response);
         setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
         Alert.alert("Lỗi", "Không thể gửi tin nhắn. Vui lòng thử lại.");
       }
     });
+  };
+
+  const handleDeleteMessage = async (messageID: string) => {
+    try {
+      if (!currentUserID) return;
+      await deleteMessage(messageID, currentUserID);
+      Alert.alert("Thành công", "Đã xóa tin nhắn");
+    } catch (error) {
+      console.error("Lỗi khi xóa tin nhắn:", error);
+      Alert.alert("Lỗi", "Không thể xóa tin nhắn. Vui lòng thử lại.");
+    }
+  };
+
+  const handleRecallMessage = async (messageID: string) => {
+    try {
+      if (!currentUserID) return;
+      await recallMessage(messageID, currentUserID);
+      Alert.alert("Thành công", "Đã thu hồi tin nhắn");
+    } catch (error) {
+      console.error("Lỗi khi thu hồi tin nhắn:", error);
+      Alert.alert("Lỗi", "Không thể thu hồi tin nhắn. Vui lòng thử lại.");
+    }
   };
 
   const handleSendSticker = async (stickerUrl: string) => {
@@ -609,7 +734,13 @@ export default function Chat() {
 
   const renderItem = useCallback(
     ({ item }: { item: Message }) => (
-      <MessageItem item={item} currentUserID={currentUserID} userID={userID} />
+      <MessageItem
+        item={item}
+        currentUserID={currentUserID}
+        userID={userID}
+        onDeleteMessage={handleDeleteMessage}
+        onRecallMessage={handleRecallMessage}
+      />
     ),
     [currentUserID, userID]
   );
@@ -645,6 +776,7 @@ export default function Chat() {
         contentContainerStyle={{ padding: 10 }}
         initialNumToRender={10}
         windowSize={5}
+        extraData={messages} // Buộc FlatList re-render khi messages thay đổi
       />
 
       <View style={styles.inputContainer}>
@@ -671,7 +803,12 @@ export default function Chat() {
         </TouchableOpacity>
       </View>
 
-      <Modal visible={showStickerPicker} animationType="slide" transparent={true} onRequestClose={() => setShowStickerPicker(false)}>
+      <Modal
+        visible={showStickerPicker}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowStickerPicker(false)}
+      >
         <View style={styles.modalContainer}>
           <View style={styles.stickerPicker}>
             <TextInput
@@ -722,6 +859,7 @@ const styles = StyleSheet.create({
   messageText: { fontSize: 16 },
   loadingText: { fontSize: 16, color: "#666", fontStyle: "italic" },
   seenText: { fontSize: 12, color: "#666", textAlign: "right" },
+  recalledMessage: { fontStyle: "italic", color: "#666" },
   sticker: { width: 100, height: 100, marginVertical: 5 },
   image: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
   videoContainer: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
@@ -745,4 +883,26 @@ const styles = StyleSheet.create({
   stickerThumbnail: { width: 80, height: 80, margin: 5 },
   closeButton: { backgroundColor: "#007AFF", padding: 10, borderRadius: 10, alignItems: "center", marginTop: 10 },
   closeButtonText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  messageOptionsContainer: {
+    backgroundColor: "white",
+    borderRadius: 10,
+    padding: 20,
+    width: "80%",
+    maxWidth: 300,
+  },
+  optionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+  },
+  optionText: {
+    fontSize: 16,
+    marginLeft: 10,
+  },
 });

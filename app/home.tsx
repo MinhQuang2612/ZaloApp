@@ -15,7 +15,7 @@ import Footer from "../components/Footer";
 import { fetchMessages, Message } from "../services/message";
 import { fetchContacts, Contact } from "../services/contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import socket, { connectSocket } from "../services/socket";
+import socket, { connectSocket, registerSocketListeners, removeSocketListeners } from "../services/socket";
 import { fetchUserGroups, Group } from "../services/group";
 
 type HomeMessage = {
@@ -28,7 +28,7 @@ type HomeMessage = {
 };
 
 type HomeGroupMessage = {
-  groupID: string;
+  groupID?: string;
   groupName: string;
   context: string;
   createdAt: string;
@@ -104,14 +104,13 @@ export default function Home() {
       setContacts(contactsData);
 
       const userGroups = await fetchUserGroups(userID);
-      console.log("Danh sách nhóm từ loadMessages:", userGroups); // Kiểm tra
+      console.log("Danh sách nhóm từ loadMessages:", userGroups);
       setGroups(userGroups);
 
       const allMessages: HomeMessage[] = [];
       const allGroupMessages: HomeGroupMessage[] = [];
       const seenMessageIDs = new Set<string>();
 
-      // Load single chat messages
       if (contactsData && contactsData.length > 0) {
         for (const contact of contactsData) {
           const contactMessages = await fetchMessages(contact.userID);
@@ -145,7 +144,6 @@ export default function Home() {
         }
       }
 
-      // Load group placeholders (no messages yet)
       if (userGroups && userGroups.length > 0) {
         userGroups.forEach((group) => {
           allGroupMessages.push({
@@ -169,182 +167,177 @@ export default function Home() {
     }
   };
 
-  useEffect(() => {
-    const initializeData = async () => {
-      setLoading(true);
-
-      const userData = await AsyncStorage.getItem("user");
-      if (!userData) {
-        console.error("Không tìm thấy user trong AsyncStorage");
-        router.replace("/login");
-        setLoading(false);
-        return;
-      }
-
-      const user = JSON.parse(userData);
-      const userID = user.userID;
-      setCurrentUserID(userID);
-
-      await loadMessages(userID);
-
-      if (!socket.connected) {
-        await connectSocket();
-      }
-
-      socket.emit("joinUserRoom", userID);
-      console.log("Home.tsx: Đã tham gia phòng người dùng:", userID);
-
-      const userGroups = await fetchUserGroups(userID);
-      console.log("Danh sách nhóm từ useEffect:", userGroups); // Kiểm tra
-      setGroups(userGroups);
-
-      userGroups.forEach((group) => {
-        if (group.groupID) {
-          socket.emit("joinGroupRoom", group.groupID);
-          console.log("Home.tsx: Đã tham gia phòng nhóm:", group.groupID);
-        } else {
-          console.warn("Nhóm không có groupID, không thể tham gia phòng:", group);
-        }
-      });
-
-      socket.on("connect", () => {
-        console.log("Home.tsx: Socket đã kết nối:", socket.id);
-        socket.emit("joinUserRoom", userID);
-        userGroups.forEach((group) => {
-          if (group.groupID) {
-            socket.emit("joinGroupRoom", group.groupID);
-          }
-        });
-      });
-
-      socket.on("receiveMessage", (message: Message) => {
-        console.log("Home.tsx: Nhận được tin nhắn đơn:", message);
-        if ((message.receiverID === userID || message.senderID === userID) && message.receiverID !== undefined) {
+  const setupSocketListeners = () => {
+    const listeners = [
+      
+      {
+        event: "updateSingleChatSeenStatus",
+        handler: ({ messageID, seenUserID }: { messageID: string; seenUserID: string }) => {
+          console.log("Home.tsx: Cập nhật trạng thái đã xem cho tin nhắn đơn messageID:", messageID, "seenUserID:", seenUserID);
           setMessages((prev) => {
-            const senderID = message.senderID === userID ? message.receiverID! : message.senderID;
-            const updatedContext =
-              message.messageTypeID === "type2" ||
-              message.messageTypeID === "type3" ||
-              message.messageTypeID === "type5"
-                ? convertFilePathToURL(message.context)
-                : message.context;
-            const newMessage: HomeMessage = {
-              senderID,
-              context: updatedContext,
-              createdAt: message.createdAt,
-              messageID: message.messageID,
-              messageTypeID: message.messageTypeID,
-              unread: message.receiverID === userID && !message.seenStatus?.includes(userID),
-            };
-
-            const existingIndex = prev.findIndex(
-              (msg) => msg.type === "single" && (msg.data as HomeMessage).senderID === senderID
-            );
-            const updatedMessages = [...prev];
-            if (existingIndex >= 0) {
-              updatedMessages[existingIndex] = { type: "single", data: newMessage };
-            } else {
-              updatedMessages.push({ type: "single", data: newMessage });
-            }
-            return updatedMessages.sort(
-              (a, b) => new Date(b.data.createdAt).getTime() - new Date(a.data.createdAt).getTime()
-            );
+            const updatedMessages = prev.map((msg) => {
+              if (msg.type === "single" && (msg.data as HomeMessage).messageID === messageID) {
+                const data = msg.data as HomeMessage;
+                return {
+                  ...msg,
+                  data: { ...data, unread: seenUserID === currentUserID ? data.unread : false },
+                };
+              }
+              return msg;
+            });
+            console.log("Home.tsx: Updated messages:", updatedMessages);
+            return [...updatedMessages];
           });
-        }
-      });
-
-      socket.on("receiveGroupMessage", async (message: Message) => {
-        console.log("Home.tsx: Nhận được tin nhắn nhóm:", message);
-        if (message.groupID) {
-          // Nếu không tìm thấy nhóm, làm mới danh sách nhóm
-          let group = groups.find((g) => g.groupID === message.groupID);
-          if (!group && currentUserID) {
-            const updatedGroups = await fetchUserGroups(currentUserID);
-            setGroups(updatedGroups);
-            group = updatedGroups.find((g) => g.groupID === message.groupID);
-          }
-
+        },
+      },
+      {
+        event: "updateGroupChatSeenStatus",
+        handler: (messageID: string, seenUserID: string) => {
+          console.log("Home.tsx: Cập nhật trạng thái đã xem cho tin nhắn nhóm messageID:", messageID, "seenUserID:", seenUserID);
           setMessages((prev) => {
-            console.log("Danh sách groups hiện tại:", groups);
-            console.log("Nhóm tìm thấy:", group);
-
-            if (!group) {
-              console.warn("Không tìm thấy nhóm cho groupID:", message.groupID);
-              return prev; // Nếu vẫn không tìm thấy, bỏ qua tin nhắn
-            }
-
-            const updatedContext =
-              message.messageTypeID === "type2" ||
-              message.messageTypeID === "type3" ||
-              message.messageTypeID === "type5"
-                ? convertFilePathToURL(message.context)
-                : message.context;
-            const newGroupMessage: HomeGroupMessage = {
-              groupID: message.groupID || "unknown-group-id",
-              groupName: group.groupName || "Nhóm không tên",
-              context: updatedContext,
-              createdAt: message.createdAt,
-              messageID: message.messageID,
-              messageTypeID: message.messageTypeID,
-              unread: !message.seenStatus?.includes(userID),
-            };
-
-            const existingIndex = prev.findIndex(
-              (msg) => msg.type === "group" && (msg.data as HomeGroupMessage).groupID === message.groupID
-            );
-            const updatedMessages = [...prev];
-            if (existingIndex >= 0) {
-              updatedMessages[existingIndex] = { type: "group", data: newGroupMessage };
-            } else {
-              updatedMessages.push({ type: "group", data: newGroupMessage });
-            }
-            return updatedMessages.sort(
-              (a, b) => new Date(b.data.createdAt).getTime() - new Date(a.data.createdAt).getTime()
-            );
+            const updatedMessages = prev.map((msg) => {
+              if (msg.type === "group" && (msg.data as HomeGroupMessage).messageID === messageID) {
+                const data = msg.data as HomeGroupMessage;
+                return {
+                  ...msg,
+                  data: { ...data, unread: seenUserID === currentUserID ? data.unread : false },
+                };
+              }
+              return msg;
+            });
+            return [...updatedMessages];
           });
-        }
-      });
+        },
+      },
+      {
+        event: "recalledSingleMessage",
+        handler: (messageID: string) => {
+          console.log("Home.tsx: Tin nhắn đơn bị thu hồi:", messageID);
+          setMessages((prev) => {
+            const updatedMessages = prev.map((msg) =>
+              msg.type === "single" && (msg.data as HomeMessage).messageID === messageID
+                ? { ...msg, data: { ...(msg.data as HomeMessage), context: "Tin nhắn đã được thu hồi" } }
+                : msg
+            );
+            return [...updatedMessages];
+          });
+        },
+      },
+      {
+        event: "deletedGroupMessage",
+        handler: (messageID: string) => {
+          console.log("Home.tsx: Tin nhắn nhóm bị xóa:", messageID);
+          setMessages((prev) => {
+            const updatedMessages = prev.map((msg) =>
+              msg.type === "group" && (msg.data as HomeGroupMessage).messageID === messageID
+                ? { ...msg, data: { ...(msg.data as HomeGroupMessage), context: "Tin nhắn đã bị xóa" } }
+                : msg
+            );
+            return [...updatedMessages];
+          });
+        },
+      },
+      {
+        event: "recalledGroupMessage",
+        handler: (messageID: string) => {
+          console.log("Home.tsx: Tin nhắn nhóm bị thu hồi:", messageID);
+          setMessages((prev) => {
+            const updatedMessages = prev.map((msg) =>
+              msg.type === "group" && (msg.data as HomeGroupMessage).messageID === messageID
+                ? { ...msg, data: { ...(msg.data as HomeGroupMessage), context: "Tin nhắn đã được thu hồi" } }
+                : msg
+            );
+            return [...updatedMessages];
+          });
+        },
+      },
+      {
+        event: "disconnect",
+        handler: (reason: string) => {
+          console.log("Home.tsx: Socket đã ngắt kết nối:", reason);
+          if (reason === "io server disconnect" || reason === "io client disconnect") {
+            connectSocket();
+          }
+        },
+      },
+    ];
 
-      socket.on("updateSingleChatSeenStatus", (messageID: string) => {
-        console.log("Home.tsx: Cập nhật trạng thái đã xem cho tin nhắn đơn messageID:", messageID);
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.type === "single" && (msg.data as HomeMessage).messageID === messageID
-              ? { ...msg, data: { ...(msg.data as HomeMessage), unread: false } }
-              : msg
-          )
-        );
-      });
+    registerSocketListeners(listeners);
 
-      socket.on("updateGroupChatSeenStatus", (messageID: string) => {
-        console.log("Home.tsx: Cập nhật trạng thái đã xem cho tin nhắn nhóm messageID:", messageID);
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.type === "group" && (msg.data as HomeGroupMessage).messageID === messageID
-              ? { ...msg, data: { ...(msg.data as HomeGroupMessage), unread: false } }
-              : msg
-          )
-        );
-      });
+  socket.on("connect", () => {
+    console.log("Home.tsx: Socket đã kết nối:", socket.id);
+    socket.emit("joinUserRoom", currentUserID);
+    groups.forEach((group) => {
+      if (group.groupID) {
+        socket.emit("joinGroup", currentUserID, group.groupID);
+        console.log("Home.tsx: Đã tham gia phòng nhóm:", group.groupID);
+      }
+    });
+  });
 
-      socket.on("disconnect", (reason) => {
-        console.log("Home.tsx: Socket đã ngắt kết nối:", reason);
-      });
+  return () => {
+    removeSocketListeners([
+      "connect",
+      "receiveMessage",
+      "updateSingleChatSeenStatus",
+      "updateGroupChatSeenStatus",
+      "deletedSingleMessage",
+      "recalledSingleMessage",
+      "deletedGroupMessage",
+      "recalledGroupMessage",
+      "disconnect",
+    ]);
+  };
+};
 
+useEffect(() => {
+  const initializeData = async () => {
+    setLoading(true);
+
+    const userData = await AsyncStorage.getItem("user");
+    if (!userData) {
+      console.error("Không tìm thấy user trong AsyncStorage");
+      router.replace("/login");
       setLoading(false);
+      return;
+    }
 
-      return () => {
-        socket.off("connect");
-        socket.off("receiveMessage");
-        socket.off("receiveGroupMessage");
-        socket.off("updateSingleChatSeenStatus");
-        socket.off("updateGroupChatSeenStatus");
-        socket.off("disconnect");
-      };
-    };
+    const user = JSON.parse(userData);
+    const userID = user.userID;
+    if (!userID) {
+      console.error("Không tìm thấy userID");
+      setLoading(false);
+      return;
+    }
+    setCurrentUserID(userID);
 
-    initializeData();
-  }, []);
+    await loadMessages(userID);
+
+    await connectSocket();
+    socket.emit("joinUserRoom", userID);
+    console.log("Home.tsx: Đã tham gia phòng người dùng:", userID);
+
+    const userGroups = await fetchUserGroups(userID);
+    console.log("Danh sách nhóm từ useEffect:", userGroups);
+    setGroups(userGroups);
+
+    userGroups.forEach((group) => {
+      if (group.groupID) {
+        socket.emit("joinGroup", userID, group.groupID);
+        console.log("Home.tsx: Đã tham gia phòng nhóm:", group.groupID);
+      } else {
+        console.warn("Nhóm không có groupID, không thể tham gia phòng:", group);
+      }
+    });
+
+    setLoading(false);
+  };
+
+  initializeData();
+  const cleanup = setupSocketListeners();
+
+  return cleanup;
+}, []);
 
   const onRefresh = async () => {
     if (!currentUserID) return;
@@ -421,6 +414,7 @@ export default function Home() {
           keyExtractor={(item, index) => `${item.type}-${item.data.messageID || item.data.createdAt}-${index}`}
           renderItem={renderItem}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          extraData={messages} // Buộc FlatList re-render khi messages thay đổi
         />
       )}
       <Footer />
