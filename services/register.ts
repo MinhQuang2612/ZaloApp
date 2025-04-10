@@ -2,6 +2,7 @@ import { Alert } from 'react-native';
 import api from './api'; // Import the shared axios instance
 
 interface RegisterRequest {
+  gmail: string;
   phoneNumber: string;
   password: string;
   username: string;
@@ -9,6 +10,7 @@ interface RegisterRequest {
 }
 
 interface RegisterResponse {
+  gmail: string;
   phoneNumber: string;
   password: string;
   username: string;

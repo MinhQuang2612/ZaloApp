@@ -22,6 +22,7 @@ export const updateProfile = async (userID: string, username: string, DOB: strin
       ...user,
       username: response.data.user.username,
       DOB: response.data.user.DOB,
+      gmail: response.data.user.gmail || user.gmail, // Thêm trường gmail
     };
     await AsyncStorage.setItem("user", JSON.stringify(updatedUser));
 

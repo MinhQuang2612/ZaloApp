@@ -80,7 +80,7 @@ export default function Welcome() {
       <TouchableOpacity style={styles.buttonPrimary} onPress={() => router.push("/login")}>
         <Text style={styles.buttonText}>Đăng nhập</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.buttonSecondary} onPress={() => router.push("/register")}>
+      <TouchableOpacity style={styles.buttonSecondary} onPress={() => router.push("/register_otp")}>
         <Text style={styles.buttonTextSecondary}>Tạo tài khoản mới</Text>
       </TouchableOpacity>
     </View>

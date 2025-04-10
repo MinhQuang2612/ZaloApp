@@ -14,13 +14,14 @@ import { useEffect, useState } from "react";
 import { getCurrentUser, logoutUser } from "../services/auth";
 import Footer from "../components/Footer";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { disconnectSocket } from "../services/socket"; // Import disconnectSocket
+import { disconnectSocket } from "../services/socket";
 
 interface User {
   userID: string;
   phoneNumber: string;
   username: string;
   DOB: string;
+  gmail: string; // Thêm trường email
 }
 
 export default function Profile() {
@@ -46,7 +47,7 @@ export default function Profile() {
 
   const handleLogout = async () => {
     await logoutUser();
-    disconnectSocket(); // Ngắt kết nối socket khi đăng xuất
+    disconnectSocket();
     router.replace("/login");
   };
 
@@ -82,7 +83,7 @@ export default function Profile() {
       <TouchableOpacity style={styles.item}>
         <Ionicons name="mail" size={22} color="#007AFF" />
         <Text style={styles.itemText}>Email</Text>
-        <Text style={styles.value}>Chưa liên kết</Text>
+        <Text style={styles.value}>{user?.gmail || "Chưa liên kết"}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.item}>

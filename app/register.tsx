@@ -1,4 +1,3 @@
-// Register.tsx
 import { useState } from "react";
 import {
   View,
@@ -8,7 +7,7 @@ import {
   StyleSheet,
   Platform,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router"; // Thêm useLocalSearchParams
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { registerUser } from "../services/register";
@@ -38,6 +37,7 @@ const CustomDatePickerModal = DatePickerModal as React.ComponentType<CustomDateP
 
 export default function Register() {
   const router = useRouter();
+  const { email } = useLocalSearchParams(); // Lấy email từ params
   const [isTermsAccepted, setTermsAccepted] = useState(false);
   const [isSocialAccepted, setSocialAccepted] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -52,13 +52,14 @@ export default function Register() {
       alert("Vui lòng đồng ý với các điều khoản!");
       return;
     }
-    if (!phoneNumber || !password || !username || !DOB) {
+    if (!email || !phoneNumber || !password || !username || !DOB) {
       alert("Vui lòng nhập đầy đủ thông tin!");
       return;
     }
 
     const formattedDOB = formatDateForAPI(DOB);
     const userData = {
+      gmail: email as string, // Ép kiểu email từ params  
       phoneNumber,
       password,
       username,
@@ -69,15 +70,12 @@ export default function Register() {
     try {
       const registeredUser = await registerUser(userData);
       if (registeredUser) {
-        // Hiển thị thông báo thành công
         alert("Đăng ký thành công!");
-        // Trì hoãn chuyển trang 1 giây
         setTimeout(() => {
           router.push("/login");
-        }, 1000); // 1000ms = 1 giây
+        }, 1000);
       }
     } catch (error) {
-      // Hiển thị thông báo lỗi nếu đăng ký thất bại
       alert("Đăng ký thất bại, vui lòng thử lại!");
       console.error("Registration error:", error);
     }
@@ -113,6 +111,14 @@ export default function Register() {
         </View>
 
         <Text style={styles.title}>Đăng ký tài khoản</Text>
+
+        {/* Email (hiển thị readonly) */}
+        <TextInput
+          style={[styles.input, styles.disabledInput]}
+          value={email as string || ""}
+          editable={false} // Không cho chỉnh sửa
+          placeholder="Email"
+        />
 
         {/* Phone Number */}
         <TextInput
@@ -206,17 +212,17 @@ export default function Register() {
         <TouchableOpacity
           style={[
             styles.button,
-            isTermsAccepted && isSocialAccepted && phoneNumber && password && username && DOB
+            isTermsAccepted && isSocialAccepted && email && phoneNumber && password && username && DOB
               ? styles.buttonActive
               : styles.buttonDisabled,
           ]}
           onPress={handleRegister}
-          disabled={!isTermsAccepted || !isSocialAccepted || !phoneNumber || !password || !username || !DOB}
+          disabled={!isTermsAccepted || !isSocialAccepted || !email || !phoneNumber || !password || !username || !DOB}
         >
           <Text
             style={[
               styles.buttonText,
-              isTermsAccepted && isSocialAccepted && phoneNumber && password && username && DOB
+              isTermsAccepted && isSocialAccepted && email && phoneNumber && password && username && DOB
                 ? styles.buttonTextActive
                 : styles.buttonTextDisabled,
             ]}
@@ -274,6 +280,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 10,
     backgroundColor: "#fff",
+  },
+  disabledInput: {
+    backgroundColor: "#F5F5F5", // Màu nền khác để chỉ rõ là readonly
+    color: "#666", // Màu chữ nhạt hơn
   },
   datePickerRow: {
     flexDirection: "row",

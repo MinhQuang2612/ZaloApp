@@ -7,6 +7,7 @@ interface User {
   phoneNumber: string;
   username: string;
   DOB: string;
+  gmail: string; // Thêm trường email
 }
 
 interface LoginResponse {

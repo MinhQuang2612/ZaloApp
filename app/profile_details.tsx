@@ -39,12 +39,12 @@ interface CustomDatePickerModalProps {
 // Ép kiểu DatePickerModal để sử dụng kiểu thủ công
 const CustomDatePickerModal = DatePickerModal as React.ComponentType<CustomDatePickerModalProps>;
 
-// Định nghĩa interface User khớp với dữ liệu từ auth.ts
 interface User {
-  userID: string; // Sửa _id thành userID
+  userID: string;
   username: string;
   phoneNumber: string;
   DOB: string;
+  gmail: string; // Thêm trường email
 }
 
 export default function ProfileDetails() {
@@ -93,7 +93,6 @@ export default function ProfileDetails() {
           return;
         }
 
-        // Dữ liệu đã khớp với interface User, không cần ánh xạ thêm
         setUser(userData);
         setUsername(userData.username);
         setDisplayDob(formatDateForDisplay(userData.DOB));
@@ -139,14 +138,14 @@ export default function ProfileDetails() {
 
     try {
       const formattedDob = formatDateToApi(dob);
-      const updatedUser = await updateProfile(user.userID, username, formattedDob); // Sử dụng userID thay vì _id
+      const updatedUser = await updateProfile(user.userID, username, formattedDob);
 
-      // Cập nhật lại user với dữ liệu mới từ API
       const formattedUpdatedUser: User = {
         userID: updatedUser.userID,
         username: updatedUser.username || user.username,
         phoneNumber: updatedUser.phoneNumber || user.phoneNumber,
         DOB: updatedUser.DOB || user.DOB,
+        gmail: updatedUser.gmail || user.gmail, // Giữ email không đổi
       };
 
       setUser(formattedUpdatedUser);
@@ -232,9 +231,14 @@ export default function ProfileDetails() {
             <Text style={styles.label}>Số điện thoại</Text>
             <Text style={styles.value}>{user?.phoneNumber || "Không có số"}</Text>
           </View>
+
+          <View style={styles.infoItem}>
+            <Ionicons name="mail" size={22} color="#007AFF" />
+            <Text style={styles.label}>Email</Text>
+            <Text style={styles.value}>{user?.gmail || "Chưa liên kết"}</Text>
+          </View>
         </View>
 
-        {/* Date Picker Modal */}
         {isEditing && (
           <CustomDatePickerModal
             locale="vi"
