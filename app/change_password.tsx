@@ -17,19 +17,11 @@ export default function ChangePassword() {
   const [newPasswordError, setNewPasswordError] = useState<string | null>(null);
   const [confirmPasswordError, setConfirmPasswordError] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
-  
-  // Kiểm tra mật khẩu hiện tại khi người dùng nhập xong (onBlur)
+
   const handleCurrentPasswordChange = async (text: string) => {
     setCurrentPassword(text);
-    if (text.length === 0) {
+    if (!text) {
       setCurrentPasswordError(null);
-      // Cập nhật lại lỗi của newPassword nếu nó đang trùng với currentPassword
-      if (newPassword && newPassword === text) {
-        setNewPasswordError("Mật khẩu mới không được trùng với mật khẩu hiện tại.");
-      } else {
-        const error = validateNewPassword(newPassword);
-        setNewPasswordError(error);
-      }
       return;
     }
 
@@ -44,32 +36,23 @@ export default function ChangePassword() {
       const phoneNumber = user.phoneNumber;
 
       await verifyCurrentPassword(phoneNumber, text);
-      setCurrentPasswordError(null); // Mật khẩu đúng
-
-      // Cập nhật lại lỗi của newPassword nếu nó đang trùng với currentPassword
-      if (newPassword && newPassword === text) {
-        setNewPasswordError("Mật khẩu mới không được trùng với mật khẩu hiện tại.");
-      } else {
-        const error = validateNewPassword(newPassword);
-        setNewPasswordError(error);
-      }
+      setCurrentPasswordError(null);
+      setNewPasswordError(validateNewPassword(newPassword, text));
     } catch (error: any) {
-      setCurrentPasswordError(error.message || "Mật khẩu hiện tại không đúng.");
+      setCurrentPasswordError(error.message);
     }
   };
 
-  // Kiểm tra khi người dùng nhập mật khẩu mới
   const handleNewPasswordChange = (text: string) => {
     setNewPassword(text);
-    if (text && text === currentPassword) {
-      setNewPasswordError("Mật khẩu mới không được trùng với mật khẩu hiện tại.");
+    setNewPasswordError(validateNewPassword(text, currentPassword));
+    if (confirmPassword && text !== confirmPassword) {
+      setConfirmPasswordError("Mật khẩu nhập lại không khớp.");
     } else {
-      const error = validateNewPassword(text);
-      setNewPasswordError(error);
+      setConfirmPasswordError(null);
     }
   };
 
-  // Kiểm tra khi người dùng nhập lại mật khẩu
   const handleConfirmPasswordChange = (text: string) => {
     setConfirmPassword(text);
     if (text && text !== newPassword) {
@@ -79,7 +62,6 @@ export default function ChangePassword() {
     }
   };
 
-  // Kiểm tra điều kiện để bật nút "CẬP NHẬT"
   const isButtonEnabled = () => {
     return (
       currentPassword.length > 0 &&
@@ -91,7 +73,6 @@ export default function ChangePassword() {
     );
   };
 
-  // Hàm xử lý đổi mật khẩu
   const handleUpdatePassword = async () => {
     if (!isButtonEnabled()) {
       Alert.alert("Lỗi", "Vui lòng kiểm tra lại thông tin nhập.");
@@ -99,14 +80,13 @@ export default function ChangePassword() {
     }
 
     setLoading(true);
-
     try {
       await changePassword(currentPassword, newPassword, confirmPassword);
       Alert.alert("Thành công", "Mật khẩu đã được cập nhật.", [
         { text: "OK", onPress: () => router.back() },
       ]);
     } catch (error: any) {
-      Alert.alert("Lỗi", error.message || "Có lỗi xảy ra khi cập nhật mật khẩu.");
+      Alert.alert("Lỗi", error.message);
     } finally {
       setLoading(false);
     }
@@ -114,14 +94,12 @@ export default function ChangePassword() {
 
   return (
     <View style={[
-            styles.container,
-            {
-              // Trên iOS: paddingTop = insets.top để nằm sát dưới Dynamic Island
-              // Trên Android: paddingTop = 3 (giá trị mặc định, không bị ảnh hưởng bởi insets)
-              paddingTop: Platform.OS === "ios" ? insets.top : 3,
-              paddingBottom: 8, // Đảm bảo chiều cao navbar đủ lớn
-            },
-          ]}>
+      styles.container,
+      {
+        paddingTop: Platform.OS === "ios" ? insets.top : 3,
+        paddingBottom: 8,
+      },
+    ]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
@@ -143,8 +121,7 @@ export default function ChangePassword() {
             secureTextEntry={!showPassword}
             placeholder="Nhập mật khẩu hiện tại"
             value={currentPassword}
-            onChangeText={setCurrentPassword}
-            onBlur={() => handleCurrentPasswordChange(currentPassword)} // Kiểm tra khi người dùng nhập xong
+            onChangeText={handleCurrentPasswordChange}
           />
           <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
             <Text style={styles.showText}>{showPassword ? "ẨN" : "HIỆN"}</Text>

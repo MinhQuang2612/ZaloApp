@@ -13,10 +13,11 @@ import {
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { getCurrentUser } from "../services/auth";
-import { updateProfile } from "../services/profile";
+import { updateProfile, updateAvatar } from "../services/profile";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Provider as PaperProvider } from "react-native-paper";
 import { DatePickerModal } from "react-native-paper-dates";
+import * as ImagePicker from "expo-image-picker";
 
 // Khai báo kiểu thủ công cho DatePickerModal
 interface CustomDatePickerModalProps {
@@ -36,7 +37,6 @@ interface CustomDatePickerModalProps {
   saveLabelDisabled?: boolean;
 }
 
-// Ép kiểu DatePickerModal để sử dụng kiểu thủ công
 const CustomDatePickerModal = DatePickerModal as React.ComponentType<CustomDatePickerModalProps>;
 
 interface User {
@@ -44,7 +44,8 @@ interface User {
   username: string;
   phoneNumber: string;
   DOB: string;
-  gmail: string; // Thêm trường email
+  gmail: string;
+  avatar?: string;
 }
 
 export default function ProfileDetails() {
@@ -53,6 +54,7 @@ export default function ProfileDetails() {
   const [loading, setLoading] = useState<boolean>(true);
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [username, setUsername] = useState<string>("");
+  const [avatar, setAvatar] = useState<string | null>(null);
   const [dob, setDob] = useState<Date>(new Date());
   const [displayDob, setDisplayDob] = useState<string>("");
   const [openDatePicker, setOpenDatePicker] = useState(false);
@@ -83,7 +85,8 @@ export default function ProfileDetails() {
     const fetchUser = async () => {
       try {
         setLoading(true);
-        const userData = await getCurrentUser();
+        const userDataRaw = await getCurrentUser();
+        const userData = userDataRaw as User;
         console.log("ProfileDetails.tsx: Fetched userData:", userData);
 
         if (!userData || !userData.userID || !userData.username || !userData.phoneNumber) {
@@ -95,6 +98,7 @@ export default function ProfileDetails() {
 
         setUser(userData);
         setUsername(userData.username);
+        setAvatar(userData.avatar || null);
         setDisplayDob(formatDateForDisplay(userData.DOB));
 
         try {
@@ -120,6 +124,26 @@ export default function ProfileDetails() {
     fetchUser();
   }, []);
 
+  const pickImage = async () => {
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permissionResult.granted) {
+      Alert.alert("Quyền truy cập bị từ chối", "Cần cấp quyền truy cập thư viện ảnh để chọn avatar.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+    });
+
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      const uri = result.assets[0].uri;
+      setAvatar(uri);
+    }
+  };
+
   const handleSave = async () => {
     if (!user) {
       Alert.alert("Lỗi", "Không có thông tin người dùng để cập nhật.");
@@ -137,15 +161,23 @@ export default function ProfileDetails() {
     }
 
     try {
+      // Cập nhật thông tin người dùng (username, DOB)
       const formattedDob = formatDateToApi(dob);
       const updatedUser = await updateProfile(user.userID, username, formattedDob);
+
+      // Nếu có ảnh avatar mới, upload ảnh lên S3
+      if (avatar && avatar !== user.avatar) {
+        const updatedUserWithAvatar = await updateAvatar(user.userID, avatar);
+        updatedUser.avatar = updatedUserWithAvatar.avatar;
+      }
 
       const formattedUpdatedUser: User = {
         userID: updatedUser.userID,
         username: updatedUser.username || user.username,
         phoneNumber: updatedUser.phoneNumber || user.phoneNumber,
         DOB: updatedUser.DOB || user.DOB,
-        gmail: updatedUser.gmail || user.gmail, // Giữ email không đổi
+        gmail: user.gmail,
+        avatar: updatedUser.avatar || user.avatar,
       };
 
       setUser(formattedUpdatedUser);
@@ -184,10 +216,27 @@ export default function ProfileDetails() {
         </View>
 
         <View style={styles.avatarContainer}>
-          <Image
-            source={require("../assets/images/dog_avatar.gif")}
-            style={styles.avatar}
-          />
+          {avatar ? (
+            <TouchableOpacity onPress={isEditing ? pickImage : undefined}>
+              <Image
+                source={{ uri: avatar }}
+                style={styles.avatar}
+                onError={(e) => console.log("Error loading avatar in ProfileDetails:", e.nativeEvent.error)}
+              />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity onPress={isEditing ? pickImage : undefined}>
+              <Image
+                source={require("../assets/images/dog_avatar.gif")}
+                style={styles.avatar}
+              />
+            </TouchableOpacity>
+          )}
+          {isEditing && (
+            <TouchableOpacity style={styles.changeAvatarButton} onPress={pickImage}>
+              <Text style={styles.changeAvatarText}>Thay đổi avatar</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.infoContainer}>
@@ -299,6 +348,17 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
+  },
+  changeAvatarButton: {
+    marginTop: 10,
+    backgroundColor: "#007AFF",
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 5,
+  },
+  changeAvatarText: {
+    color: "#fff",
+    fontSize: 14,
   },
   infoContainer: {
     backgroundColor: "#F5F5F5",

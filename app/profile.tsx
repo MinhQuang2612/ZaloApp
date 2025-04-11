@@ -8,9 +8,9 @@ import {
   Switch,
   Platform,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router"; // Thêm useFocusEffect
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getCurrentUser, logoutUser } from "../services/auth";
 import Footer from "../components/Footer";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,7 +21,8 @@ interface User {
   phoneNumber: string;
   username: string;
   DOB: string;
-  gmail: string; // Thêm trường email
+  gmail: string;
+  avatar?: string;
 }
 
 export default function Profile() {
@@ -31,19 +32,29 @@ export default function Profile() {
   const [twoFactorAuth, setTwoFactorAuth] = useState<boolean>(true);
   const insets = useSafeAreaInsets();
 
-  useEffect(() => {
-    const fetchUser = async () => {
+  const fetchUser = async () => {
+    try {
       const userData = await getCurrentUser();
+      console.log("Profile.js: Fetched userData:", userData); // Log để kiểm tra
       if (!userData) {
         router.replace("/login");
       } else {
         setUser(userData);
       }
       setLoading(false);
-    };
+    } catch (error) {
+      console.error("Profile.js: Error fetching user:", error);
+      router.replace("/login");
+      setLoading(false);
+    }
+  };
 
-    fetchUser();
-  }, []);
+  // Load user khi trang được focus (để cập nhật avatar sau khi quay lại từ ProfileDetails)
+  useFocusEffect(
+    useCallback(() => {
+      fetchUser();
+    }, [])
+  );
 
   const handleLogout = async () => {
     await logoutUser();
@@ -71,7 +82,16 @@ export default function Profile() {
       <Text style={styles.sectionTitle}>Tài khoản</Text>
       <TouchableOpacity style={styles.card} onPress={() => router.push("/profile_details")}>
         <View style={styles.row}>
-          <Image source={require("../assets/images/dog_avatar.gif")} style={styles.avatar} />
+          {/* Hiển thị avatar từ user.avatar, nếu không có thì dùng ảnh mặc định */}
+          {user?.avatar && user.avatar !== "NONE" ? (
+            <Image
+              source={{ uri: user.avatar }}
+              style={styles.avatar}
+              onError={(e) => console.log("Error loading avatar:", e.nativeEvent.error)} // Log lỗi nếu không tải được ảnh
+            />
+          ) : (
+            <Image source={require("../assets/images/dog_avatar.gif")} style={styles.avatar} />
+          )}
           <View style={styles.userInfo}>
             <Text style={styles.subText}>Thông tin cá nhân</Text>
             <Text style={styles.userName}>{user?.username || "Không có tên"}</Text>

@@ -1,9 +1,10 @@
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Platform } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Platform, Modal } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import { loginUser } from "../services/auth";
-import { useSafeAreaInsets } from "react-native-safe-area-context"; // Hook đa nền tảng
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { getGmailByPhone, sendOTP, verifyOTP, resetPassword } from "../services/forgot_password";
 
 export default function Login() {
   const router = useRouter();
@@ -13,7 +14,16 @@ export default function Login() {
   const [isPhoneFocused, setIsPhoneFocused] = useState<boolean>(false);
   const [isPasswordFocused, setIsPasswordFocused] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
-  const insets = useSafeAreaInsets(); // Lấy giá trị vùng an toàn (trên Android, insets.top thường là
+
+  // State cho quên mật khẩu
+  const [showForgotModal, setShowForgotModal] = useState<boolean>(false);
+  const [forgotPhone, setForgotPhone] = useState<string>("");
+  const [gmail, setGmail] = useState<string>("");
+  const [otp, setOtp] = useState<string>("");
+  const [step, setStep] = useState<"phone" | "otp" | "success">("phone");
+  const [forgotLoading, setForgotLoading] = useState<boolean>(false);
+
+  const insets = useSafeAreaInsets();
 
   const handleLogin = async () => {
     if (!phoneNumber || !password) {
@@ -27,22 +37,69 @@ export default function Login() {
       Alert.alert("Thành công", `Chào mừng ${user.username || "Người dùng"}!`);
       router.replace("/home");
     } catch (error: any) {
-      Alert.alert("Lỗi", error || "Đăng nhập thất bại. Vui lòng thử lại!");
+      Alert.alert("Lỗi", error.message || "Đăng nhập thất bại. Vui lòng thử lại!");
     } finally {
       setLoading(false);
     }
   };
 
+  // Xử lý quên mật khẩu
+  const handleForgotPassword = async () => {
+    setShowForgotModal(true);
+    setStep("phone");
+    setForgotPhone("");
+    setGmail("");
+    setOtp("");
+  };
+
+  const handleNextStep = async () => {
+    setForgotLoading(true);
+    try {
+      if (step === "phone") {
+        if (!forgotPhone) {
+          Alert.alert("Lỗi", "Vui lòng nhập số điện thoại!");
+          return;
+        }
+        const email = await getGmailByPhone(forgotPhone);
+        setGmail(email);
+        await sendOTP(email);
+        setStep("otp");
+        Alert.alert("Thành công", "Đã gửi OTP qua email. Vui lòng kiểm tra thư rác nếu không thấy!");
+      } else if (step === "otp") {
+        if (!otp) {
+          Alert.alert("Lỗi", "Vui lòng nhập mã OTP!");
+          return;
+        }
+        await verifyOTP(gmail, otp);
+        const resetMessage = await resetPassword(forgotPhone);
+        setStep("success");
+        Alert.alert("Thành công", resetMessage);
+      }
+    } catch (error: any) {
+      Alert.alert("Lỗi", error.message || "Đã xảy ra lỗi. Vui lòng thử lại!");
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleCloseModal = () => {
+    setShowForgotModal(false);
+    setStep("phone"); // Reset step về ban đầu
+    setForgotPhone("");
+    setGmail("");
+    setOtp("");
+  };
+
   return (
-    <View style={[
-            styles.container,
-            {
-              // Trên iOS: paddingTop = insets.top để nằm sát dưới Dynamic Island
-              // Trên Android: paddingTop = 3 (giá trị mặc định, không bị ảnh hưởng bởi insets)
-              paddingTop: Platform.OS === "ios" ? insets.top : 3,
-              paddingBottom: 8, // Đảm bảo chiều cao navbar đủ lớn
-            },
-          ]}>
+    <View
+      style={[
+        styles.container,
+        {
+          paddingTop: Platform.OS === "ios" ? insets.top : 3,
+          paddingBottom: 8,
+        },
+      ]}
+    >
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
@@ -86,7 +143,7 @@ export default function Login() {
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity style={styles.forgotPassword}>
+      <TouchableOpacity style={styles.forgotPassword} onPress={handleForgotPassword}>
         <Text style={styles.forgotText}>Lấy lại mật khẩu</Text>
       </TouchableOpacity>
 
@@ -100,6 +157,68 @@ export default function Login() {
           Đăng ký ngay
         </Text>
       </Text>
+
+      {/* Modal Quên Mật Khẩu */}
+      <Modal
+        visible={showForgotModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={handleCloseModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            {step === "phone" && (
+              <>
+                <Text style={styles.modalTitle}>Lấy lại mật khẩu</Text>
+                <Text style={styles.modalInstruction}>Nhập số điện thoại của bạn:</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Số điện thoại"
+                  keyboardType="phone-pad"
+                  value={forgotPhone}
+                  onChangeText={setForgotPhone}
+                />
+              </>
+            )}
+            {step === "otp" && (
+              <>
+                <Text style={styles.modalTitle}>Xác thực OTP</Text>
+                <Text style={styles.modalInstruction}>Nhập mã OTP đã gửi đến {gmail}:</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Mã OTP"
+                  keyboardType="numeric"
+                  value={otp}
+                  onChangeText={setOtp}
+                />
+              </>
+            )}
+            {step === "success" && (
+              <>
+                <Text style={styles.modalTitle}>Thành công</Text>
+                <Text style={styles.modalInstruction}>
+                  Mật khẩu mới đã được gửi đến Gmail của bạn. Vui lòng kiểm tra email!
+                </Text>
+              </>
+            )}
+
+            <TouchableOpacity
+              style={[styles.modalButton, forgotLoading && styles.disabledButton]}
+              onPress={step === "success" ? handleCloseModal : handleNextStep}
+              disabled={forgotLoading}
+            >
+              <Text style={styles.modalButtonText}>
+                {forgotLoading ? "Đang xử lý..." : step === "success" ? "Đóng" : "Tiếp tục"}
+              </Text>
+            </TouchableOpacity>
+            {step !== "success" && (
+              <TouchableOpacity onPress={handleCloseModal}>
+                <Text style={styles.cancelText}>Hủy</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -189,5 +308,60 @@ const styles = StyleSheet.create({
   registerLink: {
     color: "#007AFF",
     fontWeight: "bold",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContainer: {
+    backgroundColor: "#fff",
+    padding: 20,
+    borderRadius: 10,
+    width: "85%",
+    alignItems: "center",
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#007AFF",
+    marginBottom: 15,
+  },
+  modalInstruction: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 15,
+  },
+  modalInput: {
+    width: "100%",
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 5,
+    padding: 10,
+    fontSize: 16,
+    marginBottom: 15,
+  },
+  modalButton: {
+    backgroundColor: "#007AFF",
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    width: "100%",
+    alignItems: "center",
+  },
+  modalButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  disabledButton: {
+    backgroundColor: "#999",
+  },
+  cancelText: {
+    color: "#FF3B30",
+    fontSize: 14,
+    marginTop: 10,
   },
 });
