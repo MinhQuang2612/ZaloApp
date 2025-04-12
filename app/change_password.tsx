@@ -2,7 +2,7 @@ import { useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { changePassword, validateNewPassword, verifyCurrentPassword } from "../services/password";
+import { changePassword, validateNewPassword } from "../services/password";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -18,29 +18,15 @@ export default function ChangePassword() {
   const [confirmPasswordError, setConfirmPasswordError] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
 
-  const handleCurrentPasswordChange = async (text: string) => {
+  const handleCurrentPasswordChange = (text: string) => {
     setCurrentPassword(text);
     if (!text) {
       setCurrentPasswordError(null);
       return;
     }
-
-    try {
-      const userData = await AsyncStorage.getItem("user");
-      if (!userData) {
-        setCurrentPasswordError("Không tìm thấy thông tin người dùng.");
-        return;
-      }
-
-      const user = JSON.parse(userData);
-      const phoneNumber = user.phoneNumber;
-
-      await verifyCurrentPassword(phoneNumber, text);
-      setCurrentPasswordError(null);
-      setNewPasswordError(validateNewPassword(newPassword, text));
-    } catch (error: any) {
-      setCurrentPasswordError(error.message);
-    }
+    // Không cần kiểm tra mật khẩu hiện tại ở đây nữa
+    setCurrentPasswordError(null);
+    setNewPasswordError(validateNewPassword(newPassword, text));
   };
 
   const handleNewPasswordChange = (text: string) => {

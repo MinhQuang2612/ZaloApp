@@ -1,22 +1,6 @@
 import api from "./api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// Kiểm tra mật khẩu hiện tại
-export const verifyCurrentPassword = async (phoneNumber: string, currentPassword: string) => {
-  try {
-    const response = await api.post("/api/auth/login", {
-      phoneNumber,
-      password: currentPassword,
-    });
-    if (response.status !== 200 || !response.data.message.includes("đăng nhập thành công")) {
-      throw new Error("Mật khẩu hiện tại không đúng."); 
-    }
-    return true;
-  } catch (error: any) {
-    throw new Error("Mật khẩu hiện tại không đúng."); 
-  }
-};
-
 // Kiểm tra tính hợp lệ của mật khẩu mới
 export const validateNewPassword = (newPassword: string, currentPassword?: string): string | null => {
   if (!newPassword) return null;
@@ -55,16 +39,19 @@ export const changePassword = async (
   const user = JSON.parse(userData);
   const phoneNumber = user.phoneNumber;
 
-  // Kiểm tra mật khẩu hiện tại
-  await verifyCurrentPassword(phoneNumber, currentPassword);
-
   // Gọi API đổi mật khẩu
   try {
     const response = await api.put(`/api/user/changePassword/${phoneNumber}`, {
-      newPassword,
+      oldPassword: currentPassword, // Gửi mật khẩu cũ
+      newPassword, // Gửi mật khẩu mới
     });
     return response.data.message;
   } catch (error: any) {
-    throw new Error(error.response?.data?.message || "Có lỗi xảy ra khi cập nhật mật khẩu.");
+    const errorMessage = error.response?.data?.message || "Có lỗi xảy ra khi cập nhật mật khẩu.";
+    // Tùy chỉnh thông báo khi mật khẩu sai
+    if (errorMessage === "mật khẩu sai") {
+      throw new Error("Mật khẩu hiện tại không đúng. Vui lòng kiểm tra lại!");
+    }
+    throw new Error(errorMessage);
   }
 };
