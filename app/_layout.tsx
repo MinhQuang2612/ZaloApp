@@ -19,6 +19,7 @@ export default function RootLayout() {
       <Stack.Screen name="journal" options={{headerShown: false}}/>
       <Stack.Screen name="group_chat" options={{headerShown: false}}/>
       <Stack.Screen name="create_group" options={{headerShown: false}}/>
+      <Stack.Screen name="add_contact" options={{headerShown: false}}/>
     </Stack>
   );
 }

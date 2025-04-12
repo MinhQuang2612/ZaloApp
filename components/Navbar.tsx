@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useState, useRef, RefObject } from "react";
 import React from "react";
-import { useSafeAreaInsets } from "react-native-safe-area-context"; // Hook đa nền tảng
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface NavbarProps {
   title?: string;
@@ -19,17 +19,13 @@ const Navbar: React.FC<NavbarProps> = ({ title, showSearch, showQR, showAdd, add
   const [dropdownPosition, setDropdownPosition] = useState({ top: 50, right: 15 });
   const addButtonRef: RefObject<React.ElementRef<typeof TouchableOpacity>> = useRef(null);
   const screenWidth = Dimensions.get("window").width;
-  const insets = useSafeAreaInsets(); // Lấy giá trị vùng an toàn (trên Android, insets.top thường là 0)
+  const insets = useSafeAreaInsets();
 
-  // Hàm mở dropdown
   const openDropdown = () => {
     if (addButtonRef.current) {
       addButtonRef.current.measure(
         (fx: number, fy: number, width: number, height: number, px: number, py: number) => {
-          // Tính toán vị trí dropdown chính xác hơn
-          // py là vị trí Y của nút "+", height là chiều cao của nút
-          // Cộng thêm insets.top để đảm bảo dropdown không bị che bởi notch hoặc status bar
-          const adjustedTop = py + height  + 20;
+          const adjustedTop = py + height + 20;
           setDropdownPosition({ top: adjustedTop, right: screenWidth - px - width });
           setShowDropdown(true);
         }
@@ -42,15 +38,12 @@ const Navbar: React.FC<NavbarProps> = ({ title, showSearch, showQR, showAdd, add
       style={[
         styles.container,
         {
-          // Trên iOS: paddingTop = insets.top để nằm sát dưới Dynamic Island
-          // Trên Android: paddingTop = 3 (giá trị mặc định, không bị ảnh hưởng bởi insets)
           paddingTop: Platform.OS === "ios" ? insets.top : 3,
-          paddingBottom: 8, // Đảm bảo chiều cao navbar đủ lớn
-          zIndex: 1000, // Đặt zIndex cao cho Navbar
+          paddingBottom: 8,
+          zIndex: 1000,
         },
       ]}
     >
-      {/* Thanh tìm kiếm */}
       {showSearch ? (
         <View style={styles.searchContainer}>
           <Ionicons name="search" size={25} color="#fff" />
@@ -60,7 +53,6 @@ const Navbar: React.FC<NavbarProps> = ({ title, showSearch, showQR, showAdd, add
         <Text style={styles.title}>{title}</Text>
       )}
 
-      {/* Các icon bên phải */}
       <View style={styles.icons}>
         {showQR && (
           <TouchableOpacity>
@@ -75,23 +67,29 @@ const Navbar: React.FC<NavbarProps> = ({ title, showSearch, showQR, showAdd, add
         )}
       </View>
 
-      {/* Dropdown menu */}
       {showDropdown && (
         <Pressable style={styles.overlay} onPress={() => setShowDropdown(false)}>
           <View style={[styles.dropdown, { top: dropdownPosition.top, right: dropdownPosition.right }]}>
-            <TouchableOpacity style={styles.dropdownItem}>
+            <TouchableOpacity
+              style={styles.dropdownItem}
+              onPress={() => {
+                setShowDropdown(false);
+                router.push("/add_contact"); 
+              }}
+            >
               <Ionicons name="person-add-outline" size={20} color="#000" />
               <Text style={styles.dropdownText}>Thêm bạn</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.dropdownItem}
-                onPress={() => {
+            <TouchableOpacity
+              style={styles.dropdownItem}
+              onPress={() => {
                 setShowDropdown(false);
-                router.push("/create_group"); // Navigate to the group creation screen
-            }}
-              >
-  <Ionicons name="people-outline" size={20} color="#000" />
-  <Text style={styles.dropdownText}>Tạo nhóm</Text>
-</TouchableOpacity>
+                router.push("/create_group");
+              }}
+            >
+              <Ionicons name="people-outline" size={20} color="#000" />
+              <Text style={styles.dropdownText}>Tạo nhóm</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.dropdownItem}>
               <Ionicons name="cloud-outline" size={20} color="#000" />
               <Text style={styles.dropdownText}>Cloud của tôi</Text>
@@ -151,7 +149,7 @@ const styles = StyleSheet.create({
   icon: {
     marginLeft: 15,
     marginRight: 10,
-    marginHorizontal: 8, // Đều khoảng cách giữa các icon
+    marginHorizontal: 8,
   },
   overlay: {
     position: "absolute",
@@ -169,12 +167,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     width: 200,
     elevation: 10,
-    shadowColor: "#000", // Thêm bóng cho iOS
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
-    borderWidth: 0.5, // Thêm viền nhẹ
-    borderColor: "#ccc", // Màu viền nhẹ để tăng độ tương phản
+    borderWidth: 0.5,
+    borderColor: "#ccc",
   },
   dropdownItem: {
     flexDirection: "row",

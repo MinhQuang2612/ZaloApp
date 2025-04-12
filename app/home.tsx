@@ -100,7 +100,8 @@ export default function Home() {
 
   const loadMessages = async (userID: string) => {
     try {
-      const contactsData = await fetchContacts();
+      // Sửa: Truyền userID vào fetchContacts
+      const contactsData = await fetchContacts(userID);
       setContacts(contactsData);
 
       const userGroups = await fetchUserGroups(userID);
@@ -169,7 +170,6 @@ export default function Home() {
 
   const setupSocketListeners = () => {
     const listeners = [
-      
       {
         event: "updateSingleChatSeenStatus",
         handler: ({ messageID, seenUserID }: { messageID: string; seenUserID: string }) => {
@@ -264,80 +264,80 @@ export default function Home() {
 
     registerSocketListeners(listeners);
 
-  socket.on("connect", () => {
-    console.log("Home.tsx: Socket đã kết nối:", socket.id);
-    socket.emit("joinUserRoom", currentUserID);
-    groups.forEach((group) => {
-      if (group.groupID) {
-        socket.emit("joinGroup", currentUserID, group.groupID);
-        console.log("Home.tsx: Đã tham gia phòng nhóm:", group.groupID);
-      }
-    });
-  });
-
-  return () => {
-    removeSocketListeners([
-      "connect",
-      "receiveMessage",
-      "updateSingleChatSeenStatus",
-      "updateGroupChatSeenStatus",
-      "deletedSingleMessage",
-      "recalledSingleMessage",
-      "deletedGroupMessage",
-      "recalledGroupMessage",
-      "disconnect",
-    ]);
-  };
-};
-
-useEffect(() => {
-  const initializeData = async () => {
-    setLoading(true);
-
-    const userData = await AsyncStorage.getItem("user");
-    if (!userData) {
-      console.error("Không tìm thấy user trong AsyncStorage");
-      router.replace("/login");
-      setLoading(false);
-      return;
-    }
-
-    const user = JSON.parse(userData);
-    const userID = user.userID;
-    if (!userID) {
-      console.error("Không tìm thấy userID");
-      setLoading(false);
-      return;
-    }
-    setCurrentUserID(userID);
-
-    await loadMessages(userID);
-
-    await connectSocket();
-    socket.emit("joinUserRoom", userID);
-    console.log("Home.tsx: Đã tham gia phòng người dùng:", userID);
-
-    const userGroups = await fetchUserGroups(userID);
-    console.log("Danh sách nhóm từ useEffect:", userGroups);
-    setGroups(userGroups);
-
-    userGroups.forEach((group) => {
-      if (group.groupID) {
-        socket.emit("joinGroup", userID, group.groupID);
-        console.log("Home.tsx: Đã tham gia phòng nhóm:", group.groupID);
-      } else {
-        console.warn("Nhóm không có groupID, không thể tham gia phòng:", group);
-      }
+    socket.on("connect", () => {
+      console.log("Home.tsx: Socket đã kết nối:", socket.id);
+      socket.emit("joinUserRoom", currentUserID);
+      groups.forEach((group) => {
+        if (group.groupID) {
+          socket.emit("joinGroup", currentUserID, group.groupID);
+          console.log("Home.tsx: Đã tham gia phòng nhóm:", group.groupID);
+        }
+      });
     });
 
-    setLoading(false);
+    return () => {
+      removeSocketListeners([
+        "connect",
+        "receiveMessage",
+        "updateSingleChatSeenStatus",
+        "updateGroupChatSeenStatus",
+        "deletedSingleMessage",
+        "recalledSingleMessage",
+        "deletedGroupMessage",
+        "recalledGroupMessage",
+        "disconnect",
+      ]);
+    };
   };
 
-  initializeData();
-  const cleanup = setupSocketListeners();
+  useEffect(() => {
+    const initializeData = async () => {
+      setLoading(true);
 
-  return cleanup;
-}, []);
+      const userData = await AsyncStorage.getItem("user");
+      if (!userData) {
+        console.error("Không tìm thấy user trong AsyncStorage");
+        router.replace("/login");
+        setLoading(false);
+        return;
+      }
+
+      const user = JSON.parse(userData);
+      const userID = user.userID;
+      if (!userID) {
+        console.error("Không tìm thấy userID");
+        setLoading(false);
+        return;
+      }
+      setCurrentUserID(userID);
+
+      await loadMessages(userID);
+
+      await connectSocket();
+      socket.emit("joinUserRoom", userID);
+      console.log("Home.tsx: Đã tham gia phòng người dùng:", userID);
+
+      const userGroups = await fetchUserGroups(userID);
+      console.log("Danh sách nhóm từ useEffect:", userGroups);
+      setGroups(userGroups);
+
+      userGroups.forEach((group) => {
+        if (group.groupID) {
+          socket.emit("joinGroup", userID, group.groupID);
+          console.log("Home.tsx: Đã tham gia phòng nhóm:", group.groupID);
+        } else {
+          console.warn("Nhóm không có groupID, không thể tham gia phòng:", group);
+        }
+      });
+
+      setLoading(false);
+    };
+
+    initializeData();
+    const cleanup = setupSocketListeners();
+
+    return cleanup;
+  }, []);
 
   const onRefresh = async () => {
     if (!currentUserID) return;
@@ -350,6 +350,16 @@ useEffect(() => {
     if (!contacts.length) return "Đang tải...";
     const user = contacts.find((contact) => contact.userID === userID);
     return user?.username || "Không xác định";
+  };
+
+  const getUserAvatar = (userID: string) => {
+    if (!contacts.length) return "https://via.placeholder.com/50";
+    const user = contacts.find((contact) => contact.userID === userID);
+    return user?.avatar || "https://via.placeholder.com/50";
+  };
+
+  const getGroupAvatar = (groupID: string | undefined) => {
+    return "https://via.placeholder.com/50"; 
   };
 
   if (loading) {
@@ -368,7 +378,7 @@ useEffect(() => {
           style={styles.item}
           onPress={() => router.push({ pathname: "/single_chat", params: { userID: msg.senderID } })}
         >
-          <Image source={{ uri: "https://randomuser.me/api/portraits/men/1.jpg" }} style={styles.avatar} />
+          <Image source={{ uri: getUserAvatar(msg.senderID) }} style={styles.avatar} />
           <View style={styles.messageContent}>
             <Text style={styles.name}>{getUserName(msg.senderID)}</Text>
             <Text style={styles.message}>{getMessagePreview(msg)}</Text>
@@ -386,7 +396,7 @@ useEffect(() => {
           style={styles.item}
           onPress={() => router.push({ pathname: "/group_chat", params: { groupID: groupMsg.groupID } })}
         >
-          <Image source={{ uri: "https://randomuser.me/api/portraits/men/1.jpg" }} style={styles.avatar} />
+          <Image source={{ uri: getGroupAvatar(groupMsg.groupID) }} style={styles.avatar} />
           <View style={styles.messageContent}>
             <Text style={styles.name}>{groupMsg.groupName}</Text>
             <Text style={styles.message}>{getMessagePreview(groupMsg)}</Text>
@@ -414,7 +424,7 @@ useEffect(() => {
           keyExtractor={(item, index) => `${item.type}-${item.data.messageID || item.data.createdAt}-${index}`}
           renderItem={renderItem}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          extraData={messages} // Buộc FlatList re-render khi messages thay đổi
+          extraData={messages}
         />
       )}
       <Footer />

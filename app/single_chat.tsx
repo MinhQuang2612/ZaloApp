@@ -64,6 +64,26 @@ const MessageItem = ({
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showMessageOptions, setShowMessageOptions] = useState(false);
+  // Thêm state để lưu avatar của người dùng
+  const [receiverAvatar, setReceiverAvatar] = useState<string>("https://via.placeholder.com/40");
+
+  // Load avatar của người nhận khi component mount
+  useEffect(() => {
+    const loadReceiverAvatar = async () => {
+      if (userID) {
+        try {
+          const receiverData = await fetchUserByID(userID);
+          if (receiverData?.avatar) {
+            setReceiverAvatar(receiverData.avatar);
+          }
+        } catch (error) {
+          console.error("Lỗi khi lấy avatar người nhận:", error);
+        }
+      }
+    };
+
+    loadReceiverAvatar();
+  }, [userID]);
 
   useEffect(() => {
     if (effectiveType === "type3" && item.context !== "Đang tải...") {
@@ -98,7 +118,7 @@ const MessageItem = ({
       >
         {item.senderID !== currentUserID && (
           <Image
-            source={{ uri: "https://randomuser.me/api/portraits/men/1.jpg" }}
+            source={{ uri: receiverAvatar }} // Sử dụng avatar từ state
             style={styles.avatar}
             onError={(e) => console.log("Error loading avatar:", e.nativeEvent.error)}
           />
@@ -349,9 +369,9 @@ export default function Chat() {
         },
       },
     ];
-  
+
     registerSocketListeners(listeners);
-  
+
     socket.on("connect", () => {
       console.log("Chat.tsx: Socket connected:", socket.id);
       socket.emit("joinUserRoom", currentUserID);
@@ -359,7 +379,7 @@ export default function Chat() {
       console.log("Chat.tsx: Joined rooms:", currentUserID, userID);
       registerSocketListeners(listeners);
     });
-  
+
     return () => {
       removeSocketListeners([
         "connect",
@@ -465,7 +485,7 @@ export default function Chat() {
       console.log("Input invalid:", { inputText, userID, currentUserID });
       return;
     }
-  
+
     const messageID = `${socket.id}-${Date.now()}`;
     const newMessage = {
       senderID: currentUserID,
@@ -476,11 +496,11 @@ export default function Chat() {
       createdAt: new Date().toISOString(),
       seenStatus: [],
     };
-  
+
     console.log("Sending message:", newMessage);
     setMessages((prev) => [...prev, newMessage]);
     setInputText("");
-  
+
     socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
       console.log("Server response for text message:", response);
       if (response !== "Đã nhận") {
@@ -776,7 +796,7 @@ export default function Chat() {
         contentContainerStyle={{ padding: 10 }}
         initialNumToRender={10}
         windowSize={5}
-        extraData={messages} // Buộc FlatList re-render khi messages thay đổi
+        extraData={messages}
       />
 
       <View style={styles.inputContainer}>
