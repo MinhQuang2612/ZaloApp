@@ -33,7 +33,8 @@ interface CustomDatePickerModalProps {
 }
 
 // Ép kiểu DatePickerModal để sử dụng kiểu thủ công
-const CustomDatePickerModal = DatePickerModal as React.ComponentType<CustomDatePickerModalProps>;
+const CustomDatePickerModal =
+  DatePickerModal as React.ComponentType<CustomDatePickerModalProps>;
 
 export default function Register() {
   const router = useRouter();
@@ -46,6 +47,19 @@ export default function Register() {
   const [DOB, setDOB] = useState<Date | null>(null);
   const [openDatePicker, setOpenDatePicker] = useState(false);
   const insets = useSafeAreaInsets();
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+
+  // Thêm các hàm kiểm tra định dạng
+  const isValidPhoneNumber = (phone: string): boolean => {
+    const phoneRegex = /^0\d{9}$/;
+    return phoneRegex.test(phone);
+  };
+
+  const isValidPassword = (password: string): boolean => {
+    const passwordRegex = /^[a-zA-Z0-9@]*$/;
+    return passwordRegex.test(password);
+  };
 
   const handleRegister = async () => {
     if (!isTermsAccepted || !isSocialAccepted) {
@@ -57,9 +71,19 @@ export default function Register() {
       return;
     }
 
+    if (!isValidPhoneNumber(phoneNumber)) {
+      setPhoneError("Số điện thoại không hợp lệ");
+      return;
+    }
+
+    if (!isValidPassword(password)) {
+      setPasswordError("Mật khẩu không hợp lệ");
+      return;
+    }
+
     const formattedDOB = formatDateForAPI(DOB);
     const userData = {
-      gmail: email as string, // Ép kiểu email từ params  
+      gmail: email as string,
       phoneNumber,
       password,
       username,
@@ -99,12 +123,18 @@ export default function Register() {
       <View
         style={[
           styles.container,
-          { paddingTop: Platform.OS === "ios" ? insets.top : 3, paddingBottom: 8 },
+          {
+            paddingTop: Platform.OS === "ios" ? insets.top : 3,
+            paddingBottom: 8,
+          },
         ]}
       >
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
             <Ionicons name="arrow-back" size={24} color="#007AFF" />
           </TouchableOpacity>
           <Text style={styles.sub}>Đăng ký</Text>
@@ -115,28 +145,44 @@ export default function Register() {
         {/* Email (hiển thị readonly) */}
         <TextInput
           style={[styles.input, styles.disabledInput]}
-          value={email as string || ""}
+          value={(email as string) || ""}
           editable={false} // Không cho chỉnh sửa
           placeholder="Email"
         />
 
         {/* Phone Number */}
         <TextInput
-          style={styles.input}
+          style={[styles.input, phoneError ? styles.inputError : null]}
           placeholder="Số điện thoại"
           keyboardType="phone-pad"
           value={phoneNumber}
-          onChangeText={setPhoneNumber}
+          onChangeText={(text) => {
+            setPhoneNumber(text);
+            if (text && !isValidPhoneNumber(text)) {
+              setPhoneError("Số điện thoại không hợp lệ");
+            } else {
+              setPhoneError(null);
+            }
+          }}
         />
+        {phoneError && <Text style={styles.errorText}>{phoneError}</Text>}
 
         {/* Password */}
         <TextInput
-          style={styles.input}
+          style={[styles.input, passwordError ? styles.inputError : null]}
           placeholder="Mật khẩu"
           secureTextEntry
           value={password}
-          onChangeText={setPassword}
+          onChangeText={(text) => {
+            setPassword(text);
+            if (text && !isValidPassword(text)) {
+              setPasswordError("Mật khẩu không hợp lệ");
+            } else {
+              setPasswordError(null);
+            }
+          }}
         />
+        {passwordError && <Text style={styles.errorText}>{passwordError}</Text>}
 
         {/* Username */}
         <TextInput
@@ -186,10 +232,13 @@ export default function Register() {
               isTermsAccepted && styles.checkboxChecked,
             ]}
           >
-            {isTermsAccepted && <Ionicons name="checkmark" size={18} color="white" />}
+            {isTermsAccepted && (
+              <Ionicons name="checkmark" size={18} color="white" />
+            )}
           </TouchableOpacity>
           <Text style={styles.checkboxLabel}>
-            Tôi đồng ý với các <Text style={styles.link}>điều khoản sử dụng Zalo</Text>
+            Tôi đồng ý với các{" "}
+            <Text style={styles.link}>điều khoản sử dụng Zalo</Text>
           </Text>
         </View>
 
@@ -201,10 +250,13 @@ export default function Register() {
               isSocialAccepted && styles.checkboxChecked,
             ]}
           >
-            {isSocialAccepted && <Ionicons name="checkmark" size={18} color="white" />}
+            {isSocialAccepted && (
+              <Ionicons name="checkmark" size={18} color="white" />
+            )}
           </TouchableOpacity>
           <Text style={styles.checkboxLabel}>
-            Tôi đồng ý với <Text style={styles.link}>điều khoản Mạng xã hội của Zalo</Text>
+            Tôi đồng ý với{" "}
+            <Text style={styles.link}>điều khoản Mạng xã hội của Zalo</Text>
           </Text>
         </View>
 
@@ -212,17 +264,37 @@ export default function Register() {
         <TouchableOpacity
           style={[
             styles.button,
-            isTermsAccepted && isSocialAccepted && email && phoneNumber && password && username && DOB
+            isTermsAccepted &&
+            isSocialAccepted &&
+            email &&
+            phoneNumber &&
+            password &&
+            username &&
+            DOB
               ? styles.buttonActive
               : styles.buttonDisabled,
           ]}
           onPress={handleRegister}
-          disabled={!isTermsAccepted || !isSocialAccepted || !email || !phoneNumber || !password || !username || !DOB}
+          disabled={
+            !isTermsAccepted ||
+            !isSocialAccepted ||
+            !email ||
+            !phoneNumber ||
+            !password ||
+            !username ||
+            !DOB
+          }
         >
           <Text
             style={[
               styles.buttonText,
-              isTermsAccepted && isSocialAccepted && email && phoneNumber && password && username && DOB
+              isTermsAccepted &&
+              isSocialAccepted &&
+              email &&
+              phoneNumber &&
+              password &&
+              username &&
+              DOB
                 ? styles.buttonTextActive
                 : styles.buttonTextDisabled,
             ]}
@@ -233,7 +305,10 @@ export default function Register() {
 
         <Text style={styles.registerText}>
           Bạn đã có tài khoản?{" "}
-          <Text style={styles.registerLink} onPress={() => router.push("/login")}>
+          <Text
+            style={styles.registerLink}
+            onPress={() => router.push("/login")}
+          >
             Đăng nhập ngay
           </Text>
         </Text>
@@ -369,5 +444,14 @@ const styles = StyleSheet.create({
   registerLink: {
     color: "#007AFF",
     fontWeight: "bold",
+  },
+  inputError: {
+    borderColor: "#FF0000",
+  },
+  errorText: {
+    color: "#FF0000",
+    fontSize: 10, // Font nhỏ hơn
+    marginBottom: 8, // Giảm khoảng cách
+    marginLeft: 5, // Căn lề nhẹ
   },
 });
