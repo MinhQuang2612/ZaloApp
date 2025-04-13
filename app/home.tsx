@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   FlatList,
@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import { fetchMessages, Message } from "../services/message";
@@ -49,13 +49,15 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentUserID, setCurrentUserID] = useState<string | null>(null);
+  const [lastLoaded, setLastLoaded] = useState<number>(0);
   const router = useRouter();
+  const processedMessageIDs = React.useRef(new Set<string>());
 
-  const determineMessageType = (message: HomeMessage | HomeGroupMessage): string => {
+  const determineMessageType = (message: HomeMessage | HomeGroupMessage | Message): string => {
     return message.messageTypeID || "type1";
   };
 
-  const getMessagePreview = (message: HomeMessage | HomeGroupMessage): string => {
+  const getMessagePreview = (message: HomeMessage | HomeGroupMessage | Message): string => {
     const effectiveType = determineMessageType(message);
 
     switch (effectiveType) {
@@ -99,21 +101,22 @@ export default function Home() {
   };
 
   const loadMessages = async (userID: string) => {
+    console.log("Home.tsx: loadMessages called at", new Date().toISOString());
     try {
-      // Sửa: Truyền userID vào fetchContacts
+      setLoading(true);
+
       const contactsData = await fetchContacts(userID);
       setContacts(contactsData);
 
       const userGroups = await fetchUserGroups(userID);
       console.log("Danh sách nhóm từ loadMessages:", userGroups);
-      setGroups(userGroups);
 
       const allMessages: HomeMessage[] = [];
       const allGroupMessages: HomeGroupMessage[] = [];
       const seenMessageIDs = new Set<string>();
 
       if (contactsData && contactsData.length > 0) {
-        for (const contact of contactsData) {
+        const messagePromises = contactsData.map(async (contact) => {
           const contactMessages = await fetchMessages(contact.userID);
           const relevantMessages = contactMessages.filter(
             (msg) =>
@@ -125,6 +128,12 @@ export default function Home() {
             (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
           )[0];
 
+          return { contact, latestMessage };
+        });
+
+        const results = await Promise.all(messagePromises);
+
+        results.forEach(({ contact, latestMessage }) => {
           if (latestMessage && !seenMessageIDs.has(latestMessage.messageID!)) {
             seenMessageIDs.add(latestMessage.messageID!);
             const updatedContext =
@@ -142,7 +151,7 @@ export default function Home() {
               unread: latestMessage.receiverID === userID && !latestMessage.seenStatus?.includes(userID),
             });
           }
-        }
+        });
       }
 
       if (userGroups && userGroups.length > 0) {
@@ -163,13 +172,78 @@ export default function Home() {
       ].sort((a, b) => new Date(b.data.createdAt).getTime() - new Date(a.data.createdAt).getTime());
 
       setMessages(combinedMessages);
+      setLastLoaded(Date.now());
     } catch (error) {
       console.error("Lỗi khi tải tin nhắn:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const setupSocketListeners = () => {
+  const setupSocketListeners = useCallback(() => {
+    console.log("Home.tsx: Setting up socket listeners for user:", currentUserID);
+
     const listeners = [
+      {
+        event: "receiveMessage",
+        handler: (message: Message) => {
+          console.log("Home.tsx: Received message at", new Date().toISOString(), message);
+          console.log("Debug IDs:", {
+            messageSenderID: message.senderID,
+            messageReceiverID: message.receiverID,
+            currentUserID,
+          });
+
+          if (processedMessageIDs.current.has(message.messageID!)) {
+            console.log("Home.tsx: Message already processed, skipping:", message.messageID);
+            return;
+          }
+          processedMessageIDs.current.add(message.messageID!);
+
+          if (message.senderID === currentUserID || message.receiverID === currentUserID) {
+            console.log("Message matches current user:", { message, currentUserID });
+            const contactID =
+              message.senderID === currentUserID ? message.receiverID! : message.senderID;
+            const updatedContext =
+              message.messageTypeID === "type2" ||
+              message.messageTypeID === "type3" ||
+              message.messageTypeID === "type5"
+                ? convertFilePathToURL(message.context)
+                : message.context;
+
+            const newHomeMessage: HomeMessage = {
+              senderID: contactID,
+              context: updatedContext,
+              createdAt: message.createdAt,
+              messageID: message.messageID,
+              messageTypeID: message.messageTypeID,
+              unread: message.receiverID === currentUserID && !message.seenStatus?.includes(currentUserID),
+            };
+
+            setMessages((prev) => {
+              const existingIndex = prev.findIndex(
+                (msg) => msg.type === "single" && (msg.data as HomeMessage).senderID === contactID
+              );
+
+              let updatedMessages: CombinedMessage[];
+              if (existingIndex !== -1) {
+                updatedMessages = [...prev];
+                updatedMessages[existingIndex] = { type: "single", data: newHomeMessage };
+              } else {
+                updatedMessages = [...prev, { type: "single", data: newHomeMessage }];
+              }
+
+              updatedMessages = updatedMessages.sort(
+                (a, b) => new Date(b.data.createdAt).getTime() - new Date(a.data.createdAt).getTime()
+              );
+              console.log("Updated messages in Home:", updatedMessages);
+              return updatedMessages;
+            });
+          } else {
+            console.log("Message does not match current user:", { message, currentUserID });
+          }
+        },
+      },
       {
         event: "updateSingleChatSeenStatus",
         handler: ({ messageID, seenUserID }: { messageID: string; seenUserID: string }) => {
@@ -266,16 +340,13 @@ export default function Home() {
 
     socket.on("connect", () => {
       console.log("Home.tsx: Socket đã kết nối:", socket.id);
-      socket.emit("joinUserRoom", currentUserID);
-      groups.forEach((group) => {
-        if (group.groupID) {
-          socket.emit("joinGroup", currentUserID, group.groupID);
-          console.log("Home.tsx: Đã tham gia phòng nhóm:", group.groupID);
-        }
-      });
+      if (currentUserID) {
+        socket.emit("joinUserRoom", currentUserID);
+      }
     });
 
     return () => {
+      console.log("Home.tsx: Cleaning up socket listeners");
       removeSocketListeners([
         "connect",
         "receiveMessage",
@@ -288,17 +359,15 @@ export default function Home() {
         "disconnect",
       ]);
     };
-  };
+  }, [currentUserID]);
 
+  // Khởi tạo currentUserID
   useEffect(() => {
-    const initializeData = async () => {
-      setLoading(true);
-
+    const initializeUser = async () => {
       const userData = await AsyncStorage.getItem("user");
       if (!userData) {
         console.error("Không tìm thấy user trong AsyncStorage");
         router.replace("/login");
-        setLoading(false);
         return;
       }
 
@@ -306,29 +375,29 @@ export default function Home() {
       const userID = user.userID;
       if (!userID) {
         console.error("Không tìm thấy userID");
-        setLoading(false);
         return;
       }
       setCurrentUserID(userID);
+      console.log("Current user ID set to:", userID);
+    };
 
-      await loadMessages(userID);
+    initializeUser();
+  }, []);
+
+  // Khởi tạo dữ liệu chính (loadMessages và socket)
+  useEffect(() => {
+    if (!currentUserID) return;
+
+    const initializeData = async () => {
+      console.log("Home.tsx: initializeData called at", new Date().toISOString());
+      setLoading(true);
+
+      await loadMessages(currentUserID);
 
       await connectSocket();
-      socket.emit("joinUserRoom", userID);
-      console.log("Home.tsx: Đã tham gia phòng người dùng:", userID);
-
-      const userGroups = await fetchUserGroups(userID);
-      console.log("Danh sách nhóm từ useEffect:", userGroups);
-      setGroups(userGroups);
-
-      userGroups.forEach((group) => {
-        if (group.groupID) {
-          socket.emit("joinGroup", userID, group.groupID);
-          console.log("Home.tsx: Đã tham gia phòng nhóm:", group.groupID);
-        } else {
-          console.warn("Nhóm không có groupID, không thể tham gia phòng:", group);
-        }
-      });
+      socket.emit("joinUserRoom", currentUserID);
+      console.log("Home.tsx: Đã tham gia phòng người dùng:", currentUserID);
+      console.log("Socket connection status:", socket.connected);
 
       setLoading(false);
     };
@@ -337,7 +406,41 @@ export default function Home() {
     const cleanup = setupSocketListeners();
 
     return cleanup;
-  }, []);
+  }, [currentUserID, setupSocketListeners]);
+
+  // Tách logic fetch groups ra riêng
+  useEffect(() => {
+    if (!currentUserID) return;
+
+    const fetchGroups = async () => {
+      const userGroups = await fetchUserGroups(currentUserID);
+      console.log("Danh sách nhóm từ useEffect:", userGroups);
+      setGroups(userGroups);
+
+      userGroups.forEach((group) => {
+        if (group.groupID) {
+          socket.emit("joinGroup", currentUserID, group.groupID);
+          console.log("Home.tsx: Đã tham gia phòng nhóm:", group.groupID);
+        } else {
+          console.warn("Nhóm không có groupID, không thể tham gia phòng:", group);
+        }
+      });
+    };
+
+    fetchGroups();
+  }, [currentUserID]);
+
+  // Tự động load lại khi thoát khỏi single_chat
+  useFocusEffect(
+    React.useCallback(() => {
+      if (currentUserID) {
+        const now = Date.now();
+        if (now - lastLoaded > 30000) {
+          loadMessages(currentUserID);
+        }
+      }
+    }, [currentUserID, lastLoaded])
+  );
 
   const onRefresh = async () => {
     if (!currentUserID) return;
@@ -359,7 +462,7 @@ export default function Home() {
   };
 
   const getGroupAvatar = (groupID: string | undefined) => {
-    return "https://via.placeholder.com/50"; 
+    return "https://via.placeholder.com/50";
   };
 
   if (loading) {
