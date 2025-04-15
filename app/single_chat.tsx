@@ -64,10 +64,8 @@ const MessageItem = ({
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showMessageOptions, setShowMessageOptions] = useState(false);
-  // Thêm state để lưu avatar của người dùng
   const [receiverAvatar, setReceiverAvatar] = useState<string>("https://via.placeholder.com/40");
 
-  // Load avatar của người nhận khi component mount
   useEffect(() => {
     const loadReceiverAvatar = async () => {
       if (userID) {
@@ -118,7 +116,7 @@ const MessageItem = ({
       >
         {item.senderID !== currentUserID && (
           <Image
-            source={{ uri: receiverAvatar }} // Sử dụng avatar từ state
+            source={{ uri: receiverAvatar }}
             style={styles.avatar}
             onError={(e) => console.log("Error loading avatar:", e.nativeEvent.error)}
           />
@@ -126,7 +124,7 @@ const MessageItem = ({
         <View style={styles.messageBox}>
           {item.recallStatus ? (
             <Text style={styles.recalledMessage}>Tin nhắn đã được thu hồi</Text>
-          ) : item.deleteStatus && item.senderID === currentUserID ? (
+          ) : item.deleteStatusByUser?.includes(currentUserID!) ? (
             <Text style={styles.recalledMessage}>Tin nhắn đã bị xóa</Text>
           ) : (
             <>
@@ -189,7 +187,7 @@ const MessageItem = ({
               )}
             </>
           )}
-          {item.senderID === currentUserID && !item.recallStatus && (
+          {item.senderID === currentUserID && !item.recallStatus && !item.deleteStatusByUser?.includes(currentUserID!) && (
             <Text style={styles.seenText}>
               {item.seenStatus?.includes(userID!) ? "Đã xem" : "Đã gửi"}
             </Text>
@@ -357,9 +355,32 @@ export default function Chat() {
                 ? { ...msg, seenStatus: [...(msg.seenStatus || []), userID!], unread: false }
                 : msg
             );
-            console.log("Chat.tsx: Updated messages:", updatedMessages);
             return [...updatedMessages];
           });
+        },
+      },
+      {
+        event: "deletedSingleMessage",
+        handler: (messageID: string) => {
+          console.log("Chat.tsx: Received deletedSingleMessage for messageID:", messageID);
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.messageID === messageID
+                ? { ...msg, deleteStatusByUser: [...(msg.deleteStatusByUser || []), currentUserID!] }
+                : msg
+            )
+          );
+        },
+      },
+      {
+        event: "recalledSingleMessage",
+        handler: (messageID: string) => {
+          console.log("Chat.tsx: Received recalledSingleMessage for messageID:", messageID);
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.messageID === messageID ? { ...msg, recallStatus: true } : msg
+            )
+          );
         },
       },
       {
@@ -437,6 +458,9 @@ export default function Chat() {
           ) {
             message.context = convertFilePathToURL(message.context);
           }
+          // Đảm bảo deleteStatusByUser và recallStatus tồn tại
+          message.deleteStatusByUser = message.deleteStatusByUser || [];
+          message.recallStatus = message.recallStatus || false;
           return message;
         });
         setMessages(updatedData);
@@ -487,7 +511,7 @@ export default function Chat() {
     }
 
     const messageID = `${socket.id}-${Date.now()}`;
-    const newMessage = {
+    const newMessage: Message = {
       senderID: currentUserID,
       receiverID: userID,
       messageTypeID: "type1",
@@ -495,6 +519,8 @@ export default function Chat() {
       messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
+      deleteStatusByUser: [],
+      recallStatus: false,
     };
 
     console.log("Sending message:", newMessage);
@@ -514,10 +540,26 @@ export default function Chat() {
   const handleDeleteMessage = async (messageID: string) => {
     try {
       if (!currentUserID) return;
+      // Optimistic update
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.messageID === messageID
+            ? { ...msg, deleteStatusByUser: [...(msg.deleteStatusByUser || []), currentUserID] }
+            : msg
+        )
+      );
       await deleteMessage(messageID, currentUserID);
       Alert.alert("Thành công", "Đã xóa tin nhắn");
     } catch (error) {
       console.error("Lỗi khi xóa tin nhắn:", error);
+      // Revert optimistic update
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.messageID === messageID
+            ? { ...msg, deleteStatusByUser: (msg.deleteStatusByUser || []).filter((id) => id !== currentUserID) }
+            : msg
+        )
+      );
       Alert.alert("Lỗi", "Không thể xóa tin nhắn. Vui lòng thử lại.");
     }
   };
@@ -525,10 +567,18 @@ export default function Chat() {
   const handleRecallMessage = async (messageID: string) => {
     try {
       if (!currentUserID) return;
+      // Optimistic update
+      setMessages((prev) =>
+        prev.map((msg) => (msg.messageID === messageID ? { ...msg, recallStatus: true } : msg))
+      );
       await recallMessage(messageID, currentUserID);
       Alert.alert("Thành công", "Đã thu hồi tin nhắn");
     } catch (error) {
       console.error("Lỗi khi thu hồi tin nhắn:", error);
+      // Revert optimistic update
+      setMessages((prev) =>
+        prev.map((msg) => (msg.messageID === messageID ? { ...msg, recallStatus: false } : msg))
+      );
       Alert.alert("Lỗi", "Không thể thu hồi tin nhắn. Vui lòng thử lại.");
     }
   };
@@ -549,6 +599,8 @@ export default function Chat() {
       messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
+      deleteStatusByUser: [],
+      recallStatus: false,
     };
 
     setMessages((prev) => [...prev, newMessage]);
@@ -600,6 +652,8 @@ export default function Chat() {
       messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
+      deleteStatusByUser: [],
+      recallStatus: false,
     };
 
     setMessages((prev) => [...prev, tempMessage]);
@@ -614,6 +668,8 @@ export default function Chat() {
         messageID,
         createdAt: new Date().toISOString(),
         seenStatus: [],
+        deleteStatusByUser: [],
+        recallStatus: false,
         file: { name: `image-${Date.now()}.jpg`, data: fileBase64 },
       };
 
@@ -666,6 +722,8 @@ export default function Chat() {
       messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
+      deleteStatusByUser: [],
+      recallStatus: false,
     };
 
     setMessages((prev) => [...prev, tempMessage]);
@@ -680,6 +738,8 @@ export default function Chat() {
         messageID,
         createdAt: new Date().toISOString(),
         seenStatus: [],
+        deleteStatusByUser: [],
+        recallStatus: false,
         file: { name: `video-${Date.now()}.mp4`, data: fileBase64 },
       };
 
@@ -715,6 +775,8 @@ export default function Chat() {
       messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
+      deleteStatusByUser: [],
+      recallStatus: false,
     };
 
     setMessages((prev) => [...prev, tempMessage]);
@@ -729,6 +791,8 @@ export default function Chat() {
         messageID,
         createdAt: new Date().toISOString(),
         seenStatus: [],
+        deleteStatusByUser: [],
+        recallStatus: false,
         file: { name: fileName, data: fileBase64 },
       };
 

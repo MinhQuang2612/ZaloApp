@@ -131,7 +131,7 @@ export default function Contacts() {
 
   return (
     <View style={styles.container}>
-      <Navbar showSearch showAdd addIconType="person-add-outline" />
+      <Navbar showSearch showAdd addIconType="add" />
       <View style={styles.tabs}>
         <TouchableOpacity
           style={[styles.tab, activeTab === "friends" && styles.activeTab]}
