@@ -92,7 +92,7 @@ const MessageItem = ({
             <Text style={styles.loadingText}>Đang tải...</Text>
           ) : (
             <Image
-              source={{ uri: item.context || "https://via.placeholder.com/200" }}
+              source={{ uri: item.context }}
               style={styles.image}
               resizeMode="cover"
               onError={(e) => console.log("Error loading image:", e.nativeEvent.error)}
@@ -121,7 +121,7 @@ const MessageItem = ({
         )}
         {effectiveType === "type4" && (
           <Image
-            source={{ uri: item.context || "https://via.placeholder.com/100" }}
+            source={{ uri: item.context }}
             style={styles.sticker}
             resizeMode="contain"
             onError={(e) => console.log("Error loading sticker:", e.nativeEvent.error)}

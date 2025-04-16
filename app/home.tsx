@@ -52,6 +52,7 @@ export default function Home() {
   const [lastLoaded, setLastLoaded] = useState<number>(0);
   const router = useRouter();
   const processedMessageIDs = React.useRef(new Set<string>());
+  const joinedContactRooms = React.useRef(new Set<string>()); // Theo dõi các phòng liên hệ đã tham gia
 
   const determineMessageType = (message: HomeMessage | HomeGroupMessage | Message): string => {
     return message.messageTypeID || "type1";
@@ -73,6 +74,8 @@ export default function Home() {
         return "Đã gửi sticker";
       case "type5":
         return "Đã gửi file";
+      case "type6":
+        return "Đã gửi thoại";
       default:
         return "Tin nhắn không xác định";
     }
@@ -139,7 +142,8 @@ export default function Home() {
             const updatedContext =
               latestMessage.messageTypeID === "type2" ||
               latestMessage.messageTypeID === "type3" ||
-              latestMessage.messageTypeID === "type5"
+              latestMessage.messageTypeID === "type5" ||
+              latestMessage.messageTypeID === "type6"
                 ? convertFilePathToURL(latestMessage.context)
                 : latestMessage.context;
             allMessages.push({
@@ -204,12 +208,16 @@ export default function Home() {
             console.log("Message matches current user:", { message, currentUserID });
             const contactID =
               message.senderID === currentUserID ? message.receiverID! : message.senderID;
-            const updatedContext =
+
+            let updatedContext = message.context;
+            if (
               message.messageTypeID === "type2" ||
               message.messageTypeID === "type3" ||
-              message.messageTypeID === "type5"
-                ? convertFilePathToURL(message.context)
-                : message.context;
+              message.messageTypeID === "type5" ||
+              message.messageTypeID === "type6"
+            ) {
+              updatedContext = convertFilePathToURL(message.context);
+            }
 
             const newHomeMessage: HomeMessage = {
               senderID: contactID,
@@ -397,16 +405,34 @@ export default function Home() {
       await connectSocket();
       socket.emit("joinUserRoom", currentUserID);
       console.log("Home.tsx: Đã tham gia phòng người dùng:", currentUserID);
-      console.log("Socket connection status:", socket.connected);
 
+      console.log("Socket connection status:", socket.connected);
       setLoading(false);
     };
 
     initializeData();
-    const cleanup = setupSocketListeners();
+  }, [currentUserID]);
 
-    return cleanup;
-  }, [currentUserID, setupSocketListeners]);
+  // Sử dụng useFocusEffect để đăng ký lại socket listeners khi màn hình được focus
+  useFocusEffect(
+    useCallback(() => {
+      const cleanup = setupSocketListeners();
+      return cleanup;
+    }, [setupSocketListeners])
+  );
+
+  // Tham gia phòng của các liên hệ (chỉ khi contacts thay đổi)
+  useEffect(() => {
+    if (!currentUserID || !contacts.length) return;
+
+    contacts.forEach((contact) => {
+      if (!joinedContactRooms.current.has(contact.userID)) {
+        socket.emit("joinUserRoom", contact.userID);
+        joinedContactRooms.current.add(contact.userID);
+        console.log("Home.tsx: Đã tham gia phòng liên hệ:", contact.userID);
+      }
+    });
+  }, [currentUserID, contacts]);
 
   // Tách logic fetch groups ra riêng
   useEffect(() => {
@@ -435,7 +461,8 @@ export default function Home() {
     React.useCallback(() => {
       if (currentUserID) {
         const now = Date.now();
-        if (now - lastLoaded > 30000) {
+        if (now - lastLoaded > 30000) { // Chỉ reload nếu đã hơn 30 giây
+          console.log("Home.tsx: Reloading messages on focus");
           loadMessages(currentUserID);
         }
       }
@@ -456,13 +483,13 @@ export default function Home() {
   };
 
   const getUserAvatar = (userID: string) => {
-    if (!contacts.length) return "https://via.placeholder.com/50";
+    if (!contacts.length) return undefined;
     const user = contacts.find((contact) => contact.userID === userID);
-    return user?.avatar || "https://via.placeholder.com/50";
+    return user?.avatar;
   };
 
   const getGroupAvatar = (groupID: string | undefined) => {
-    return "https://via.placeholder.com/50";
+    return undefined;
   };
 
   if (loading) {
@@ -476,12 +503,17 @@ export default function Home() {
   const renderItem = ({ item }: { item: CombinedMessage }) => {
     if (item.type === "single") {
       const msg = item.data as HomeMessage;
+      const avatarUri = getUserAvatar(msg.senderID);
       return (
         <TouchableOpacity
           style={styles.item}
           onPress={() => router.push({ pathname: "/single_chat", params: { userID: msg.senderID } })}
         >
-          <Image source={{ uri: getUserAvatar(msg.senderID) }} style={styles.avatar} />
+          {avatarUri ? (
+            <Image source={{ uri: avatarUri }} style={styles.avatar} />
+          ) : (
+            <View style={styles.avatarPlaceholder} />
+          )}
           <View style={styles.messageContent}>
             <Text style={styles.name}>{getUserName(msg.senderID)}</Text>
             <Text style={styles.message}>{getMessagePreview(msg)}</Text>
@@ -494,12 +526,17 @@ export default function Home() {
       );
     } else {
       const groupMsg = item.data as HomeGroupMessage;
+      const groupAvatarUri = getGroupAvatar(groupMsg.groupID);
       return (
         <TouchableOpacity
           style={styles.item}
           onPress={() => router.push({ pathname: "/group_chat", params: { groupID: groupMsg.groupID } })}
         >
-          <Image source={{ uri: getGroupAvatar(groupMsg.groupID) }} style={styles.avatar} />
+          {groupAvatarUri ? (
+            <Image source={{ uri: groupAvatarUri }} style={styles.avatar} />
+          ) : (
+            <View style={styles.avatarPlaceholder} />
+          )}
           <View style={styles.messageContent}>
             <Text style={styles.name}>{groupMsg.groupName}</Text>
             <Text style={styles.message}>{getMessagePreview(groupMsg)}</Text>
@@ -542,6 +579,7 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 16, color: "#666" },
   item: { flexDirection: "row", alignItems: "center", padding: 15, borderBottomWidth: 1, borderBottomColor: "#ddd" },
   avatar: { width: 50, height: 50, borderRadius: 25 },
+  avatarPlaceholder: { width: 50, height: 50, borderRadius: 25, backgroundColor: "#ddd" },
   messageContent: { flex: 1, marginLeft: 10 },
   name: { fontSize: 16, fontWeight: "bold" },
   message: { fontSize: 14, color: "#666" },

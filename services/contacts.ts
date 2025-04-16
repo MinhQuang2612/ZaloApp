@@ -23,7 +23,7 @@ export const fetchContacts = async (userID: string): Promise<Contact[]> => {
           return {
             userID: contact.userID,
             username: contactDetails.data.username || "Không xác định",
-            avatar: contactDetails.data.avatar || "https://via.placeholder.com/50",
+            avatar: contactDetails.data.avatar,
             phoneNumber: contactDetails.data.phoneNumber || "Không có số điện thoại",
           };
         } catch (error) {
@@ -31,7 +31,7 @@ export const fetchContacts = async (userID: string): Promise<Contact[]> => {
           return {
             userID: contact.userID,
             username: "Không xác định",
-            avatar: "https://via.placeholder.com/50",
+            avatar: undefined,
             phoneNumber: "Không có số điện thoại",
           };
         }
@@ -52,7 +52,7 @@ export const fetchUserByID = async (userID: string): Promise<Contact | null> => 
     return {
       userID: response.data.userID,
       username: response.data.username || "Không xác định",
-      avatar: response.data.avatar || "https://via.placeholder.com/50",
+      avatar: response.data.avatar,
       phoneNumber: response.data.phoneNumber || "Không có số điện thoại",
     };
   } catch (error) {
@@ -68,7 +68,7 @@ export const fetchAllUsers = async (): Promise<Contact[]> => {
     return response.data.map((user: any) => ({
       userID: user.userID,
       username: user.username || "Không xác định",
-      avatar: user.avatar || "https://via.placeholder.com/50",
+      avatar: user.avatar,
       phoneNumber: user.phoneNumber || "Không có số điện thoại",
     }));
   } catch (error) {

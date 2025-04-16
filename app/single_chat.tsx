@@ -22,7 +22,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
-import { Video } from "expo-av";
+import { Audio, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import socket, { connectSocket, deleteMessage, recallMessage, registerSocketListeners, removeSocketListeners } from "../services/socket";
 
@@ -64,18 +64,19 @@ const MessageItem = ({
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showMessageOptions, setShowMessageOptions] = useState(false);
-  const [receiverAvatar, setReceiverAvatar] = useState<string>("https://via.placeholder.com/40");
+  const [receiverAvatar, setReceiverAvatar] = useState<string | null>(null);
+  const [isPlayingVoice, setIsPlayingVoice] = useState(false);
+  const soundRef = useRef<Audio.Sound | null>(null);
 
   useEffect(() => {
     const loadReceiverAvatar = async () => {
       if (userID) {
         try {
           const receiverData = await fetchUserByID(userID);
-          if (receiverData?.avatar) {
-            setReceiverAvatar(receiverData.avatar);
-          }
+          setReceiverAvatar(receiverData?.avatar || null);
         } catch (error) {
           console.error("Lỗi khi lấy avatar người nhận:", error);
+          setReceiverAvatar(null);
         }
       }
     };
@@ -84,16 +85,62 @@ const MessageItem = ({
   }, [userID]);
 
   useEffect(() => {
-    if (effectiveType === "type3" && item.context !== "Đang tải...") {
+    if (effectiveType === "type3" && item.context && item.context !== "Đang tải...") {
       setVideoUri(item.context);
+    } else {
+      setVideoUri(null);
     }
   }, [item.context, effectiveType]);
 
+  useEffect(() => {
+    return () => {
+      if (soundRef.current) {
+        soundRef.current.unloadAsync();
+      }
+    };
+  }, []);
+
   const handleFilePress = (url: string) => {
+    if (!url) return;
     Linking.openURL(url).catch((err) => {
       console.error("Lỗi khi mở file:", err);
       Alert.alert("Lỗi", "Không thể mở file. Vui lòng thử lại.");
     });
+  };
+
+  const handlePlayVoice = async () => {
+    if (!item.context) return;
+
+    if (isPlayingVoice) {
+      if (soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
+      setIsPlayingVoice(false);
+      return;
+    }
+
+    try {
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: item.context },
+        { shouldPlay: true }
+      );
+      soundRef.current = sound;
+      setIsPlayingVoice(true);
+
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          setIsPlayingVoice(false);
+          sound.unloadAsync();
+          soundRef.current = null;
+        }
+      });
+    } catch (error) {
+      console.error("Lỗi khi phát Voice:", error);
+      Alert.alert("Lỗi", "Không thể phát tin nhắn thoại.");
+      setIsPlayingVoice(false);
+    }
   };
 
   const handleLongPress = () => {
@@ -115,11 +162,15 @@ const MessageItem = ({
         ]}
       >
         {item.senderID !== currentUserID && (
-          <Image
-            source={{ uri: receiverAvatar }}
-            style={styles.avatar}
-            onError={(e) => console.log("Error loading avatar:", e.nativeEvent.error)}
-          />
+          receiverAvatar && receiverAvatar.trim() !== "" ? (
+            <Image
+              source={{ uri: receiverAvatar }}
+              style={styles.avatar}
+              onError={(e) => console.log("Error loading avatar:", e.nativeEvent.error)}
+            />
+          ) : (
+            <View style={styles.avatarPlaceholder} />
+          )
         )}
         <View style={styles.messageBox}>
           {item.recallStatus ? (
@@ -134,20 +185,22 @@ const MessageItem = ({
               {effectiveType === "type2" && (
                 item.context === "Đang tải..." ? (
                   <Text style={styles.loadingText}>Đang tải...</Text>
-                ) : (
+                ) : item.context && item.context.trim() !== "" ? (
                   <Image
-                    source={{ uri: item.context || "https://via.placeholder.com/200" }}
+                    source={{ uri: item.context }}
                     style={styles.image}
                     resizeMode="cover"
                     onError={(e) => console.log("Error loading image:", e.nativeEvent.error)}
                   />
+                ) : (
+                  <Text style={styles.errorText}>Không thể tải hình ảnh</Text>
                 )
               )}
               {effectiveType === "type3" && (
                 <View style={styles.videoContainer}>
                   {error ? (
                     <Text style={{ color: "red" }}>{error}</Text>
-                  ) : videoUri ? (
+                  ) : videoUri && videoUri.trim() !== "" ? (
                     <Video
                       source={{ uri: videoUri }}
                       style={styles.video}
@@ -159,17 +212,21 @@ const MessageItem = ({
                       onLoad={() => console.log("Video loaded successfully")}
                     />
                   ) : (
-                    <Text>Đang tải video...</Text>
+                    <Text>Không thể tải video</Text>
                   )}
                 </View>
               )}
               {effectiveType === "type4" && (
-                <Image
-                  source={{ uri: item.context || "https://via.placeholder.com/100" }}
-                  style={styles.sticker}
-                  resizeMode="contain"
-                  onError={(e) => console.log("Error loading sticker:", e.nativeEvent.error)}
-                />
+                item.context && item.context.trim() !== "" ? (
+                  <Image
+                    source={{ uri: item.context }}
+                    style={styles.sticker}
+                    resizeMode="contain"
+                    onError={(e) => console.log("Error loading sticker:", e.nativeEvent.error)}
+                  />
+                ) : (
+                  <Text style={styles.errorText}>Không thể tải sticker</Text>
+                )
               )}
               {effectiveType === "type5" && (
                 item.context === "Đang tải..." ? (
@@ -183,6 +240,24 @@ const MessageItem = ({
                       </Text>
                     </View>
                   </TouchableOpacity>
+                )
+              )}
+              {effectiveType === "type6" && (
+                item.context === "Đang tải..." ? (
+                  <Text style={styles.loadingText}>Đang tải...</Text>
+                ) : item.context && item.context.trim() !== "" ? (
+                  <TouchableOpacity onPress={handlePlayVoice}>
+                    <View style={styles.voiceContainer}>
+                      <Ionicons
+                        name={isPlayingVoice ? "pause-circle" : "play-circle"}
+                        size={24}
+                        color="#007AFF"
+                      />
+                      <Text style={styles.voiceText}>Tin nhắn thoại</Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={styles.errorText}>Không thể tải tin nhắn thoại</Text>
                 )
               )}
             </>
@@ -255,6 +330,8 @@ const getMessagePreview = (message: Message): string => {
       return "Đã gửi sticker";
     case "type5":
       return "Đã gửi file";
+    case "type6":
+      return "Đã gửi tin nhắn thoại";
     default:
       return "Tin nhắn không xác định";
   }
@@ -270,12 +347,37 @@ export default function Chat() {
   const [loading, setLoading] = useState(true);
   const [markedAsSeen, setMarkedAsSeen] = useState<Set<string>>(new Set());
   const flatListRef = useRef<FlatList>(null);
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
 
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [stickers, setStickers] = useState<GiphySticker[]>([]);
   const [stickerSearchTerm, setStickerSearchTerm] = useState("funny");
   const insets = useSafeAreaInsets();
   const GIPHY_API_KEY = "ahUloRbYoMUhR2aBUDO2iyNObLH8dnMa";
+
+  // Cleanup recording khi component unmount
+  useEffect(() => {
+    return () => {
+      const cleanupRecording = async () => {
+        if (recording) {
+          try {
+            const status = await recording.getStatusAsync();
+            if (status.canRecord || status.isRecording) {
+              await recording.stopAndUnloadAsync();
+            }
+          } catch (error) {
+            console.error("Lỗi khi cleanup recording:", error);
+          } finally {
+            setRecording(null);
+            setIsRecording(false);
+          }
+        }
+      };
+
+      cleanupRecording();
+    };
+  }, [recording]);
 
   const fetchStickers = async (term: string) => {
     try {
@@ -327,12 +429,28 @@ export default function Chat() {
             (message.senderID === currentUserID && message.receiverID === userID)
           ) {
             setMessages((prev) => {
-              const exists = prev.some((msg) => msg.messageID === message.messageID);
-              if (!exists) {
+              const existingIndex = prev.findIndex((msg) => msg.messageID === message.messageID);
+              if (existingIndex !== -1) {
+                // Nếu tin nhắn đã tồn tại (ví dụ: tin nhắn tạm thời của người gửi), thay thế nó
+                const updatedMessages = [...prev];
                 if (
                   message.messageTypeID === "type2" ||
                   message.messageTypeID === "type3" ||
-                  message.messageTypeID === "type5"
+                  message.messageTypeID === "type5" ||
+                  message.messageTypeID === "type6"
+                ) {
+                  message.context = convertFilePathToURL(message.context);
+                }
+                updatedMessages[existingIndex] = message;
+                setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+                return updatedMessages;
+              } else {
+                // Nếu là tin nhắn mới (từ người nhận), thêm vào danh sách
+                if (
+                  message.messageTypeID === "type2" ||
+                  message.messageTypeID === "type3" ||
+                  message.messageTypeID === "type5" ||
+                  message.messageTypeID === "type6"
                 ) {
                   message.context = convertFilePathToURL(message.context);
                 }
@@ -340,7 +458,6 @@ export default function Chat() {
                 setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
                 return newMessages;
               }
-              return prev;
             });
           }
         },
@@ -454,11 +571,11 @@ export default function Chat() {
           if (
             message.messageTypeID === "type2" ||
             message.messageTypeID === "type3" ||
-            message.messageTypeID === "type5"
+            message.messageTypeID === "type5" ||
+            message.messageTypeID === "type6"
           ) {
             message.context = convertFilePathToURL(message.context);
           }
-          // Đảm bảo deleteStatusByUser và recallStatus tồn tại
           message.deleteStatusByUser = message.deleteStatusByUser || [];
           message.recallStatus = message.recallStatus || false;
           return message;
@@ -531,7 +648,6 @@ export default function Chat() {
       console.log("Server response for text message:", response);
       if (response !== "Đã nhận") {
         console.log("Message failed, response:", response);
-        setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
         Alert.alert("Lỗi", "Không thể gửi tin nhắn. Vui lòng thử lại.");
       }
     });
@@ -540,7 +656,6 @@ export default function Chat() {
   const handleDeleteMessage = async (messageID: string) => {
     try {
       if (!currentUserID) return;
-      // Optimistic update
       setMessages((prev) =>
         prev.map((msg) =>
           msg.messageID === messageID
@@ -552,7 +667,6 @@ export default function Chat() {
       Alert.alert("Thành công", "Đã xóa tin nhắn");
     } catch (error) {
       console.error("Lỗi khi xóa tin nhắn:", error);
-      // Revert optimistic update
       setMessages((prev) =>
         prev.map((msg) =>
           msg.messageID === messageID
@@ -567,7 +681,6 @@ export default function Chat() {
   const handleRecallMessage = async (messageID: string) => {
     try {
       if (!currentUserID) return;
-      // Optimistic update
       setMessages((prev) =>
         prev.map((msg) => (msg.messageID === messageID ? { ...msg, recallStatus: true } : msg))
       );
@@ -575,7 +688,6 @@ export default function Chat() {
       Alert.alert("Thành công", "Đã thu hồi tin nhắn");
     } catch (error) {
       console.error("Lỗi khi thu hồi tin nhắn:", error);
-      // Revert optimistic update
       setMessages((prev) =>
         prev.map((msg) => (msg.messageID === messageID ? { ...msg, recallStatus: false } : msg))
       );
@@ -810,6 +922,123 @@ export default function Chat() {
     }
   };
 
+  const handleStartRecording = async () => {
+    if (isRecording) {
+      console.log("Đang ghi âm, không thể bắt đầu phiên mới.");
+      return;
+    }
+
+    if (recording) {
+      try {
+        const status = await recording.getStatusAsync();
+        if (status.canRecord || status.isRecording) {
+          await recording.stopAndUnloadAsync();
+        }
+      } catch (error) {
+        console.error("Lỗi khi giải phóng recording cũ:", error);
+      } finally {
+        setRecording(null);
+        setIsRecording(false);
+      }
+    }
+
+    try {
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Quyền truy cập bị từ chối",
+          "Ứng dụng cần quyền truy cập micro để ghi âm. Vui lòng cấp quyền trong cài đặt."
+        );
+        return;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const newRecording = new Audio.Recording();
+      await newRecording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await newRecording.startAsync();
+      setRecording(newRecording);
+      setIsRecording(true);
+    } catch (error) {
+      console.error("Lỗi khi bắt đầu ghi âm:", error);
+      Alert.alert("Lỗi", "Không thể bắt đầu ghi âm. Vui lòng thử lại.");
+      setRecording(null);
+      setIsRecording(false);
+    }
+  };
+
+  const handleStopRecording = async () => {
+    if (!recording || !userID || !currentUserID) {
+      setIsRecording(false);
+      setRecording(null);
+      return;
+    }
+
+    try {
+      const status = await recording.getStatusAsync();
+      if (status.isRecording) {
+        await recording.stopAndUnloadAsync();
+      }
+      const uri = recording.getURI();
+
+      if (!uri) {
+        Alert.alert("Lỗi", "Không thể lấy file ghi âm.");
+        setRecording(null);
+        setIsRecording(false);
+        return;
+      }
+
+      const messageID = `${socket.id}-${Date.now()}`;
+      const tempMessage: Message = {
+        senderID: currentUserID,
+        receiverID: userID,
+        messageTypeID: "type6",
+        context: "Đang tải...",
+        messageID,
+        createdAt: new Date().toISOString(),
+        seenStatus: [],
+        deleteStatusByUser: [],
+        recallStatus: false,
+      };
+
+      setMessages((prev) => [...prev, tempMessage]);
+
+      const fileBase64 = await convertFileToBase64(uri);
+      const newMessage: Message = {
+        senderID: currentUserID,
+        receiverID: userID,
+        messageTypeID: "type6",
+        context: "",
+        messageID,
+        createdAt: new Date().toISOString(),
+        seenStatus: [],
+        deleteStatusByUser: [],
+        recallStatus: false,
+        file: { name: `voice-${Date.now()}.m4a`, data: fileBase64 },
+      };
+
+      socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
+        console.log("Server response for voice:", response);
+        if (response !== "Đã nhận") {
+          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+          Alert.alert("Lỗi", "Không thể gửi tin nhắn thoại. Vui lòng thử lại.");
+        }
+      });
+    } catch (error) {
+      console.error("Lỗi khi dừng ghi âm:", error);
+      Alert.alert("Lỗi", "Không thể gửi tin nhắn thoại. Vui lòng thử lại.");
+      setMessages((prev) =>
+        prev.filter((msg) => msg.messageID !== `${socket.id}-${Date.now()}`)
+      );
+    } finally {
+      setRecording(null);
+      setIsRecording(false);
+    }
+  };
+
   useEffect(() => {
     if (flatListRef.current && messages.length > 0) {
       flatListRef.current.scrollToEnd({ animated: true });
@@ -876,6 +1105,17 @@ export default function Chat() {
         <TouchableOpacity onPress={handleSendFile}>
           <Ionicons name="document-outline" size={24} color="#666" style={{ marginLeft: 10 }} />
         </TouchableOpacity>
+        <TouchableOpacity
+          onPressIn={handleStartRecording}
+          onPressOut={handleStopRecording}
+        >
+          <Ionicons
+            name={isRecording ? "mic-off" : "mic"}
+            size={24}
+            color={isRecording ? "#FF3B30" : "#666"}
+            style={{ marginLeft: 10 }}
+          />
+        </TouchableOpacity>
         <TextInput
           style={styles.input}
           placeholder="Tin nhắn"
@@ -939,6 +1179,7 @@ const styles = StyleSheet.create({
   myMessage: { justifyContent: "flex-end", alignSelf: "flex-end" },
   otherMessage: { justifyContent: "flex-start", alignSelf: "flex-start" },
   avatar: { width: 40, height: 40, borderRadius: 20, marginRight: 10 },
+  avatarPlaceholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#ddd", marginRight: 10 },
   messageBox: { backgroundColor: "#fff", padding: 10, borderRadius: 10 },
   messageText: { fontSize: 16 },
   loadingText: { fontSize: 16, color: "#666", fontStyle: "italic" },
@@ -950,6 +1191,9 @@ const styles = StyleSheet.create({
   video: { width: "100%", height: "100%", borderRadius: 10, resizeMode: "contain" },
   fileContainer: { flexDirection: "row", alignItems: "center", marginVertical: 5 },
   fileText: { fontSize: 16, color: "#007AFF", marginLeft: 10 },
+  voiceContainer: { flexDirection: "row", alignItems: "center", marginVertical: 5 },
+  voiceText: { fontSize: 16, color: "#007AFF", marginLeft: 10 },
+  errorText: { fontSize: 14, color: "red", fontStyle: "italic" },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
