@@ -144,7 +144,8 @@ const MessageItem = ({
   };
 
   const handleLongPress = () => {
-    if (item.senderID === currentUserID && !item.recallStatus) {
+    // Cho phép cả người gửi và người nhận xóa hoặc thu hồi tin nhắn
+    if (!item.recallStatus) {
       setShowMessageOptions(true);
     }
   };
@@ -293,16 +294,18 @@ const MessageItem = ({
                 <Ionicons name="trash-outline" size={24} color="#FF3B30" />
                 <Text style={[styles.optionText, { color: "#FF3B30" }]}>Xóa tin nhắn</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.optionButton}
-                onPress={() => {
-                  onRecallMessage(item.messageID!);
-                  setShowMessageOptions(false);
-                }}
-              >
-                <Ionicons name="refresh-outline" size={24} color="#007AFF" />
-                <Text style={styles.optionText}>Thu hồi tin nhắn</Text>
-              </TouchableOpacity>
+              {item.senderID === currentUserID && (
+                <TouchableOpacity
+                  style={styles.optionButton}
+                  onPress={() => {
+                    onRecallMessage(item.messageID!);
+                    setShowMessageOptions(false);
+                  }}
+                >
+                  <Ionicons name="refresh-outline" size={24} color="#007AFF" />
+                  <Text style={styles.optionText}>Thu hồi tin nhắn</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </TouchableOpacity>
         </Modal>
@@ -413,7 +416,7 @@ export default function Chat() {
     }
     if (context && context.startsWith(uploadsPath)) {
       const fileName = context.split("\\").pop();
-      return `${process.env.EXPO_PUBLIC_API_URL}/uploads/${fileName}`;
+      return `${process.env.EXPO_PUBLIC_API_URL}/Uploads/${fileName}`;
     }
     return context;
   };
@@ -431,7 +434,6 @@ export default function Chat() {
             setMessages((prev) => {
               const existingIndex = prev.findIndex((msg) => msg.messageID === message.messageID);
               if (existingIndex !== -1) {
-                // Nếu tin nhắn đã tồn tại (ví dụ: tin nhắn tạm thời của người gửi), thay thế nó
                 const updatedMessages = [...prev];
                 if (
                   message.messageTypeID === "type2" ||
@@ -445,7 +447,6 @@ export default function Chat() {
                 setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
                 return updatedMessages;
               } else {
-                // Nếu là tin nhắn mới (từ người nhận), thêm vào danh sách
                 if (
                   message.messageTypeID === "type2" ||
                   message.messageTypeID === "type3" ||
@@ -478,12 +479,15 @@ export default function Chat() {
       },
       {
         event: "deletedSingleMessage",
-        handler: (messageID: string) => {
-          console.log("Chat.tsx: Received deletedSingleMessage for messageID:", messageID);
+        handler: (data: { messageID: string; userID: string }) => {
+          console.log("Chat.tsx: Received deletedSingleMessage for messageID:", data.messageID, "by userID:", data.userID);
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.messageID === messageID
-                ? { ...msg, deleteStatusByUser: [...(msg.deleteStatusByUser || []), currentUserID!] }
+              msg.messageID === data.messageID
+                ? {
+                    ...msg,
+                    deleteStatusByUser: [...(msg.deleteStatusByUser || []), data.userID],
+                  }
                 : msg
             )
           );
