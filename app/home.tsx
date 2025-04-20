@@ -12,7 +12,7 @@ import {
   TextInput,
   Button,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import { fetchMessages, Message } from "../services/message";
@@ -284,15 +284,25 @@ export default function Home() {
         handler: (message: Message) => {
           if (!isMounted.current) return;
           console.log("Home.tsx: Received message at", new Date().toISOString(), message);
-          if (processedMessageIDs.current.has(message.messageID!)) {
+
+          if (!message.messageID) {
+            console.log("Home.tsx: Invalid message ID, skipping:", message);
+            return;
+          }
+
+          if (processedMessageIDs.current.has(message.messageID)) {
             console.log("Home.tsx: Message already processed, skipping:", message.messageID);
             return;
           }
-          processedMessageIDs.current.add(message.messageID!);
+          processedMessageIDs.current.add(message.messageID);
 
-          if (message.groupID) {
+          console.log("Home.tsx: Checking if message is relevant - currentUserID:", currentUserID, "senderID:", message.senderID, "receiverID:", message.receiverID);
+          if (message.groupID && message.groupID !== "NONE") {
             const group = groups.find((g) => g.groupID === message.groupID);
-            if (!group) return;
+            if (!group) {
+              console.log("Home.tsx: Group not found, skipping:", message.groupID);
+              return;
+            }
 
             let updatedContext = message.context;
             if (
@@ -311,9 +321,10 @@ export default function Home() {
               createdAt: message.createdAt,
               messageID: message.messageID,
               messageTypeID: message.messageTypeID,
-              unreadCount: !message.seenStatus?.includes(currentUserID!) ? 1 : 0,
+              unreadCount: !message.seenStatus?.includes(currentUserID) ? 1 : 0,
             };
 
+            console.log("Home.tsx: Adding new group message:", newGroupMessage);
             setMessages((prev) => {
               const existingIndex = prev.findIndex(
                 (msg) => msg.type === "group" && (msg.data as HomeGroupMessage).groupID === message.groupID
@@ -334,9 +345,11 @@ export default function Home() {
                 updatedMessages = [...prev, { type: "group", data: newGroupMessage }];
               }
 
-              return updatedMessages.sort(
+              const sortedMessages = updatedMessages.sort(
                 (a, b) => new Date(b.data.createdAt).getTime() - new Date(a.data.createdAt).getTime()
               );
+              console.log("Home.tsx: Updated messages (group):", sortedMessages);
+              return sortedMessages;
             });
           } else if (message.senderID === currentUserID || message.receiverID === currentUserID) {
             const contactID =
@@ -361,6 +374,7 @@ export default function Home() {
               unreadCount: message.receiverID === currentUserID && !message.seenStatus?.includes(currentUserID) ? 1 : 0,
             };
 
+            console.log("Home.tsx: Adding new single message:", newHomeMessage);
             setMessages((prev) => {
               const existingIndex = prev.findIndex(
                 (msg) => msg.type === "single" && (msg.data as HomeMessage).senderID === contactID
@@ -381,10 +395,14 @@ export default function Home() {
                 updatedMessages = [...prev, { type: "single", data: newHomeMessage }];
               }
 
-              return updatedMessages.sort(
+              const sortedMessages = updatedMessages.sort(
                 (a, b) => new Date(b.data.createdAt).getTime() - new Date(a.data.createdAt).getTime()
               );
+              console.log("Home.tsx: Updated messages (single):", sortedMessages);
+              return sortedMessages;
             });
+          } else {
+            console.log("Home.tsx: Message not relevant to current user, skipping:", message);
           }
         },
       },
@@ -534,15 +552,13 @@ export default function Home() {
       return;
     }
     try {
-      // Sửa lỗi: Gọi createGroup với đúng định dạng { groupName, userID }
       const newGroup = await createGroup({ groupName, userID: currentUserID! });
       setGroups((prev) => [...prev, newGroup]);
 
-      // Sửa lỗi TypeScript: Đảm bảo type: "group" và dữ liệu khớp HomeGroupMessage
       setMessages((prev) => [
         ...prev,
         {
-          type: "group" as const, // Rõ ràng kiểu literal
+          type: "group" as const,
           data: {
             groupID: newGroup.groupID,
             groupName: newGroup.groupName,
@@ -611,6 +627,23 @@ export default function Home() {
       ]);
     };
   }, [loadMessages, setupSocketListeners]);
+
+  // Tự động load lại khi màn hình được focus
+  useFocusEffect(
+    useCallback(() => {
+      if (currentUserID) {
+        console.log("Home.tsx: Screen focused, reloading messages for user:", currentUserID);
+        // Làm sạch processedMessageIDs để không bỏ qua tin nhắn mới
+        processedMessageIDs.current.clear();
+        console.log("Home.tsx: Cleared processedMessageIDs");
+        loadMessages(currentUserID);
+      }
+
+      return () => {
+        console.log("Home.tsx: Screen unfocused");
+      };
+    }, [currentUserID, loadMessages])
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -715,7 +748,6 @@ export default function Home() {
               value={groupName}
               onChangeText={setGroupName}
             />
-            {/* Tạm ẩn chọn thành viên vì API không hỗ trợ */}
             <View style={styles.modalButtons}>
               <Button title="Hủy" onPress={() => setShowCreateGroupModal(false)} />
               <Button title="Tạo" onPress={handleCreateGroup} />

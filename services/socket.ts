@@ -1,13 +1,14 @@
 import { io, Socket } from "socket.io-client";
 import { getAccessToken, refreshAccessToken } from "../services/auth";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://192.168.0.184:3000";
+// Cập nhật URL để dùng HTTPS nếu EC2 đã có SSL, hoặc dùng HTTP để kiểm tra
+const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://3.95.192.17:3000"; // Thay đổi nếu đã có HTTPS
 console.log("Socket API URL:", API_URL);
 
 const socket: Socket = io(API_URL, {
   reconnection: true,
-  reconnectionAttempts: 5,
-  reconnectionDelay: 1000,
+  reconnectionAttempts: Infinity, // Thử kết nối lại vô số lần
+  reconnectionDelay: 1000, // Delay giữa các lần thử (1 giây)
   timeout: 30000,
   autoConnect: false,
   transports: ["websocket"],
@@ -83,8 +84,11 @@ socket.on("connect_error", async (error) => {
 
 socket.on("disconnect", (reason) => {
   console.log("Socket disconnected:", reason);
-  if (reason === "io server disconnect" && !isConnecting) {
-    connectSocket();
+  if (reason === "io server disconnect" || reason === "transport error") {
+    console.log("Attempting to reconnect due to:", reason);
+    if (!isConnecting) {
+      connectSocket();
+    }
   }
 });
 
