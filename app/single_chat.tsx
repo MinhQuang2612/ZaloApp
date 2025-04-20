@@ -171,7 +171,7 @@ const MessageItem = ({
             <Ionicons name="share-outline" size={24} color="#007AFF" />
             <Text style={styles.optionText}>Chuyển tiếp</Text>
           </TouchableOpacity>
-          {item.senderID === currentUserID && (
+          {item.senderID === currentUserID && !item.recallStatus && (
             <TouchableOpacity
               style={styles.optionButton}
               onPress={() => {
@@ -523,7 +523,6 @@ export default function Chat() {
                 : msg
             )
           );
-          // Lưu trạng thái xóa vào AsyncStorage
           saveMessageStatus(data.messageID, "deleted");
         },
       },
@@ -536,7 +535,6 @@ export default function Chat() {
               msg.messageID === messageID ? { ...msg, recallStatus: true } : msg
             )
           );
-          // Lưu trạng thái thu hồi vào AsyncStorage
           saveMessageStatus(messageID, "recalled");
         },
       },
@@ -572,7 +570,6 @@ export default function Chat() {
     };
   }, [currentUserID, userID]);
 
-  // Hàm lưu trạng thái xóa/thu hồi vào AsyncStorage
   const saveMessageStatus = async (messageID: string, status: "deleted" | "recalled") => {
     try {
       const existingStatuses = await AsyncStorage.getItem("messageStatuses");
@@ -585,7 +582,6 @@ export default function Chat() {
     }
   };
 
-  // Cache tin nhắn và áp dụng trạng thái xóa/thu hồi
   const loadMessagesWithCache = async (targetUserID: string) => {
     try {
       const cacheKey = `messages_${targetUserID}`;
@@ -612,7 +608,6 @@ export default function Chat() {
         message.deleteStatusByUser = message.deleteStatusByUser || [];
         message.recallStatus = message.recallStatus || false;
 
-        // Áp dụng trạng thái từ AsyncStorage
         if (statuses[message.messageID!]) {
           if (statuses[message.messageID!] === "deleted") {
             message.deleteStatusByUser = [...(message.deleteStatusByUser || []), currentUserID!];
@@ -624,7 +619,6 @@ export default function Chat() {
         return message;
       });
 
-      // So sánh và cập nhật nếu có thay đổi
       if (JSON.stringify(updatedData) !== JSON.stringify(loadedMessages)) {
         setMessages(updatedData);
         await AsyncStorage.setItem(cacheKey, JSON.stringify(updatedData));
@@ -756,7 +750,7 @@ export default function Chat() {
             : msg
         )
       );
-      await saveMessageStatus(messageID, "deleted"); // Lưu trạng thái xóa vào AsyncStorage
+      await saveMessageStatus(messageID, "deleted");
       await deleteMessage(messageID, currentUserID);
       console.log("Chat.tsx: Deleted messageID:", messageID);
       Alert.alert("Thành công", "Đã xóa tin nhắn");
@@ -780,7 +774,7 @@ export default function Chat() {
       setMessages((prev) =>
         prev.map((msg) => (msg.messageID === messageID ? { ...msg, recallStatus: true } : msg))
       );
-      await saveMessageStatus(messageID, "recalled"); // Lưu trạng thái thu hồi vào AsyncStorage
+      await saveMessageStatus(messageID, "recalled");
       await recallMessage(messageID, currentUserID);
       console.log("Chat.tsx: Recalled messageID:", messageID);
       Alert.alert("Thành công", "Đã thu hồi tin nhắn");
@@ -1161,7 +1155,7 @@ export default function Chat() {
       const newMessage: Message = {
         senderID: currentUserID,
         receiverID: userID,
- messageTypeID: "type6",
+        messageTypeID: "type6",
         context: "",
         messageID,
         createdAt: new Date().toISOString(),
@@ -1220,7 +1214,7 @@ export default function Chat() {
   const renderPinnedMessage = () => {
     if (!pinnedMessageID) return null;
     const pinnedMessage = messages.find((msg) => msg.messageID === pinnedMessageID);
-    if (!pinnedMessage) return null;
+    if (!pinnedMessage || pinnedMessage.recallStatus || pinnedMessage.deleteStatusByUser?.includes(currentUserID!)) return null;
 
     return (
       <View style={styles.pinnedMessageContainer}>
