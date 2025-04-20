@@ -17,7 +17,7 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { fetchMessages, sendMessage, Message } from "../services/message";
-import { fetchUserByID } from "../services/contacts";
+import { fetchUserByID, fetchContacts, Contact } from "../services/contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
@@ -25,6 +25,7 @@ import * as FileSystem from "expo-file-system";
 import { Audio, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import socket, { connectSocket, deleteMessage, recallMessage, registerSocketListeners, removeSocketListeners } from "../services/socket";
+import { fetchUserGroups, Group } from "../services/group";
 
 type SocketResponse =
   | "đang gửi"
@@ -47,18 +48,24 @@ type GiphySticker = {
   };
 };
 
+type ForwardItem = { type: "contact"; data: Contact } | { type: "group"; data: Group };
+
 const MessageItem = ({
   item,
   currentUserID,
   userID,
   onDeleteMessage,
   onRecallMessage,
+  onForwardMessage,
+  onPinMessage,
 }: {
   item: Message;
   currentUserID: string | null;
   userID: string | undefined;
   onDeleteMessage: (messageID: string) => void;
   onRecallMessage: (messageID: string) => void;
+  onForwardMessage: (messageID: string) => void;
+  onPinMessage: (messageID: string) => void;
 }) => {
   const effectiveType = determineMessageType(item);
   const [videoUri, setVideoUri] = useState<string | null>(null);
@@ -143,37 +150,96 @@ const MessageItem = ({
     }
   };
 
-  const handleLongPress = () => {
-    // Cho phép cả người gửi và người nhận xóa hoặc thu hồi tin nhắn
-    if (!item.recallStatus) {
-      setShowMessageOptions(true);
-    }
-  };
+  const isForwarded = item.messageID?.includes("-share-");
+
+  const renderMessageOptions = () => (
+    <Modal
+      visible={showMessageOptions}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={() => setShowMessageOptions(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.messageOptionsContainer}>
+          <TouchableOpacity
+            style={styles.optionButton}
+            onPress={() => {
+              setShowMessageOptions(false);
+              onForwardMessage(item.messageID!);
+            }}
+          >
+            <Ionicons name="share-outline" size={24} color="#007AFF" />
+            <Text style={styles.optionText}>Chuyển tiếp</Text>
+          </TouchableOpacity>
+          {item.senderID === currentUserID && (
+            <TouchableOpacity
+              style={styles.optionButton}
+              onPress={() => {
+                setShowMessageOptions(false);
+                onRecallMessage(item.messageID!);
+              }}
+            >
+              <Ionicons name="refresh-outline" size={24} color="#007AFF" />
+              <Text style={styles.optionText}>Thu hồi</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={styles.optionButton}
+            onPress={() => {
+              setShowMessageOptions(false);
+              onDeleteMessage(item.messageID!);
+            }}
+          >
+            <Ionicons name="trash-outline" size={24} color="#FF3B30" />
+            <Text style={styles.optionText}>Xóa</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.optionButton}
+            onPress={() => {
+              setShowMessageOptions(false);
+              onPinMessage(item.messageID!);
+            }}
+          >
+            <Ionicons name="pin-outline" size={24} color="#007AFF" />
+            <Text style={styles.optionText}>Ghim</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.optionButton, { justifyContent: "center" }]}
+            onPress={() => setShowMessageOptions(false)}
+          >
+            <Text style={[styles.optionText, { color: "#FF3B30" }]}>Hủy</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
 
   return (
-    <TouchableOpacity
-      onLongPress={handleLongPress}
-      delayLongPress={500}
-      activeOpacity={0.7}
+    <View
+      style={[
+        styles.messageContainer,
+        item.senderID === currentUserID ? styles.myMessage : styles.otherMessage,
+      ]}
     >
+      {item.senderID !== currentUserID && (
+        receiverAvatar && receiverAvatar.trim() !== "" ? (
+          <Image
+            source={{ uri: receiverAvatar }}
+            style={styles.avatar}
+            onError={(e) => console.log("Error loading avatar:", e.nativeEvent.error)}
+          />
+        ) : (
+          <View style={styles.avatarPlaceholder} />
+        )
+      )}
       <View
         style={[
-          styles.messageContainer,
-          item.senderID === currentUserID ? styles.myMessage : styles.otherMessage,
+          styles.messageBoxWrapper,
+          item.senderID === currentUserID ? { flexDirection: "row-reverse" } : {},
         ]}
       >
-        {item.senderID !== currentUserID && (
-          receiverAvatar && receiverAvatar.trim() !== "" ? (
-            <Image
-              source={{ uri: receiverAvatar }}
-              style={styles.avatar}
-              onError={(e) => console.log("Error loading avatar:", e.nativeEvent.error)}
-            />
-          ) : (
-            <View style={styles.avatarPlaceholder} />
-          )
-        )}
         <View style={styles.messageBox}>
+          {isForwarded && <Text style={styles.forwardedLabel}>Đã chuyển tiếp</Text>}
           {item.recallStatus ? (
             <Text style={styles.recalledMessage}>Tin nhắn đã được thu hồi</Text>
           ) : item.deleteStatusByUser?.includes(currentUserID!) ? (
@@ -269,75 +335,25 @@ const MessageItem = ({
             </Text>
           )}
         </View>
-      </View>
-
-      {showMessageOptions && (
-        <Modal
-          visible={showMessageOptions}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowMessageOptions(false)}
-        >
+        {!item.recallStatus && !item.deleteStatusByUser?.includes(currentUserID!) && (
           <TouchableOpacity
-            style={styles.modalOverlay}
-            activeOpacity={1}
-            onPress={() => setShowMessageOptions(false)}
+            style={styles.optionsButton}
+            onPress={() => {
+              console.log("Chat.tsx: Pressed options button for messageID:", item.messageID);
+              setShowMessageOptions(true);
+            }}
           >
-            <View style={styles.messageOptionsContainer}>
-              <TouchableOpacity
-                style={styles.optionButton}
-                onPress={() => {
-                  onDeleteMessage(item.messageID!);
-                  setShowMessageOptions(false);
-                }}
-              >
-                <Ionicons name="trash-outline" size={24} color="#FF3B30" />
-                <Text style={[styles.optionText, { color: "#FF3B30" }]}>Xóa tin nhắn</Text>
-              </TouchableOpacity>
-              {item.senderID === currentUserID && (
-                <TouchableOpacity
-                  style={styles.optionButton}
-                  onPress={() => {
-                    onRecallMessage(item.messageID!);
-                    setShowMessageOptions(false);
-                  }}
-                >
-                  <Ionicons name="refresh-outline" size={24} color="#007AFF" />
-                  <Text style={styles.optionText}>Thu hồi tin nhắn</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            <Ionicons name="ellipsis-vertical" size={24} color="#666" />
           </TouchableOpacity>
-        </Modal>
-      )}
-    </TouchableOpacity>
+        )}
+      </View>
+      {renderMessageOptions()}
+    </View>
   );
 };
 
 const determineMessageType = (message: Message): string => {
   return message.messageTypeID || "type1";
-};
-
-const getMessagePreview = (message: Message): string => {
-  const effectiveType = determineMessageType(message);
-  switch (effectiveType) {
-    case "type1":
-      return message.context.length > 50
-        ? message.context.substring(0, 50) + "..."
-        : message.context;
-    case "type2":
-      return "Đã gửi ảnh";
-    case "type3":
-      return "Đã gửi video";
-    case "type4":
-      return "Đã gửi sticker";
-    case "type5":
-      return "Đã gửi file";
-    case "type6":
-      return "Đã gửi tin nhắn thoại";
-    default:
-      return "Tin nhắn không xác định";
-  }
 };
 
 export default function Chat() {
@@ -349,17 +365,21 @@ export default function Chat() {
   const [receiverName, setReceiverName] = useState<string>("Đang tải...");
   const [loading, setLoading] = useState(true);
   const [markedAsSeen, setMarkedAsSeen] = useState<Set<string>>(new Set());
+  const [showForwardModal, setShowForwardModal] = useState(false);
+  const [forwardMessageID, setForwardMessageID] = useState<string | null>(null);
+  const [selectedForwardItems, setSelectedForwardItems] = useState<string[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [pinnedMessageID, setPinnedMessageID] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
-
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [stickers, setStickers] = useState<GiphySticker[]>([]);
   const [stickerSearchTerm, setStickerSearchTerm] = useState("funny");
   const insets = useSafeAreaInsets();
   const GIPHY_API_KEY = "ahUloRbYoMUhR2aBUDO2iyNObLH8dnMa";
 
-  // Cleanup recording khi component unmount
   useEffect(() => {
     return () => {
       const cleanupRecording = async () => {
@@ -419,6 +439,18 @@ export default function Chat() {
       return `${process.env.EXPO_PUBLIC_API_URL}/Uploads/${fileName}`;
     }
     return context;
+  };
+
+  const loadContactsAndGroups = async (userID: string) => {
+    try {
+      const contactsData = await fetchContacts(userID);
+      setContacts(contactsData);
+      const groupsData = await fetchUserGroups(userID);
+      setGroups(groupsData);
+    } catch (error) {
+      console.error("Lỗi khi tải danh bạ và nhóm:", error);
+      Alert.alert("Lỗi", "Không thể tải danh bạ hoặc nhóm. Vui lòng thử lại.");
+    }
   };
 
   const setupSocketListeners = useCallback(() => {
@@ -491,6 +523,8 @@ export default function Chat() {
                 : msg
             )
           );
+          // Lưu trạng thái xóa vào AsyncStorage
+          saveMessageStatus(data.messageID, "deleted");
         },
       },
       {
@@ -502,6 +536,17 @@ export default function Chat() {
               msg.messageID === messageID ? { ...msg, recallStatus: true } : msg
             )
           );
+          // Lưu trạng thái thu hồi vào AsyncStorage
+          saveMessageStatus(messageID, "recalled");
+        },
+      },
+      {
+        event: "connect",
+        handler: () => {
+          console.log("Chat.tsx: Socket connected:", socket.id);
+          socket.emit("joinUserRoom", currentUserID);
+          socket.emit("joinUserRoom", userID);
+          console.log("Chat.tsx: Joined rooms:", currentUserID, userID);
         },
       },
       {
@@ -514,15 +559,8 @@ export default function Chat() {
 
     registerSocketListeners(listeners);
 
-    socket.on("connect", () => {
-      console.log("Chat.tsx: Socket connected:", socket.id);
-      socket.emit("joinUserRoom", currentUserID);
-      socket.emit("joinUserRoom", userID);
-      console.log("Chat.tsx: Joined rooms:", currentUserID, userID);
-      registerSocketListeners(listeners);
-    });
-
     return () => {
+      console.log("Chat.tsx: Cleaning up socket listeners");
       removeSocketListeners([
         "connect",
         "receiveMessage",
@@ -533,6 +571,70 @@ export default function Chat() {
       ]);
     };
   }, [currentUserID, userID]);
+
+  // Hàm lưu trạng thái xóa/thu hồi vào AsyncStorage
+  const saveMessageStatus = async (messageID: string, status: "deleted" | "recalled") => {
+    try {
+      const existingStatuses = await AsyncStorage.getItem("messageStatuses");
+      const statuses = existingStatuses ? JSON.parse(existingStatuses) : {};
+      statuses[messageID] = status;
+      await AsyncStorage.setItem("messageStatuses", JSON.stringify(statuses));
+      console.log(`Chat.tsx: Saved message status - ${messageID}: ${status}`);
+    } catch (error) {
+      console.error("Lỗi khi lưu trạng thái tin nhắn:", error);
+    }
+  };
+
+  // Cache tin nhắn và áp dụng trạng thái xóa/thu hồi
+  const loadMessagesWithCache = async (targetUserID: string) => {
+    try {
+      const cacheKey = `messages_${targetUserID}`;
+      const statusKey = "messageStatuses";
+      const cachedMessages = await AsyncStorage.getItem(cacheKey);
+      const messageStatuses = await AsyncStorage.getItem(statusKey);
+      const statuses = messageStatuses ? JSON.parse(messageStatuses) : {};
+
+      let loadedMessages: Message[] = [];
+      if (cachedMessages) {
+        loadedMessages = JSON.parse(cachedMessages);
+      }
+
+      const data = await fetchMessages(targetUserID);
+      const updatedData = data.map((message) => {
+        if (
+          message.messageTypeID === "type2" ||
+          message.messageTypeID === "type3" ||
+          message.messageTypeID === "type5" ||
+          message.messageTypeID === "type6"
+        ) {
+          message.context = convertFilePathToURL(message.context);
+        }
+        message.deleteStatusByUser = message.deleteStatusByUser || [];
+        message.recallStatus = message.recallStatus || false;
+
+        // Áp dụng trạng thái từ AsyncStorage
+        if (statuses[message.messageID!]) {
+          if (statuses[message.messageID!] === "deleted") {
+            message.deleteStatusByUser = [...(message.deleteStatusByUser || []), currentUserID!];
+          } else if (statuses[message.messageID!] === "recalled") {
+            message.recallStatus = true;
+          }
+        }
+
+        return message;
+      });
+
+      // So sánh và cập nhật nếu có thay đổi
+      if (JSON.stringify(updatedData) !== JSON.stringify(loadedMessages)) {
+        setMessages(updatedData);
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(updatedData));
+      } else {
+        setMessages(loadedMessages);
+      }
+    } catch (error) {
+      console.error("Lỗi khi lấy tin nhắn:", error);
+    }
+  };
 
   useEffect(() => {
     const initializeSocketAndData = async () => {
@@ -569,38 +671,25 @@ export default function Chat() {
         console.error("Lỗi khi lấy thông tin người dùng:", error);
       }
 
-      try {
-        const data = await fetchMessages(userID);
-        const updatedData = data.map((message) => {
-          if (
-            message.messageTypeID === "type2" ||
-            message.messageTypeID === "type3" ||
-            message.messageTypeID === "type5" ||
-            message.messageTypeID === "type6"
-          ) {
-            message.context = convertFilePathToURL(message.context);
-          }
-          message.deleteStatusByUser = message.deleteStatusByUser || [];
-          message.recallStatus = message.recallStatus || false;
-          return message;
-        });
-        setMessages(updatedData);
-      } catch (error) {
-        console.error("Lỗi khi lấy tin nhắn ban đầu:", error);
-      }
-
+      await loadMessagesWithCache(userID);
+      await loadContactsAndGroups(userIDValue);
       await connectSocket();
-      socket.emit("joinUserRoom", userIDValue);
-      socket.emit("joinUserRoom", userID);
-      console.log("Chat.tsx: Joined rooms:", userIDValue, userID);
-
+      setupSocketListeners();
       setLoading(false);
     };
 
     initializeSocketAndData();
-    const cleanup = setupSocketListeners();
 
-    return cleanup;
+    return () => {
+      removeSocketListeners([
+        "connect",
+        "receiveMessage",
+        "updateSingleChatSeenStatus",
+        "deletedSingleMessage",
+        "recalledSingleMessage",
+        "disconnect",
+      ]);
+    };
   }, [userID, setupSocketListeners]);
 
   useEffect(() => {
@@ -613,9 +702,9 @@ export default function Chat() {
       );
       console.log("Chat.tsx: Marking as seen:", unreadMessages.length, "messages");
       unreadMessages.forEach((msg) => {
-        if (msg.messageID) {
+        if (msg.messageID && !markedAsSeen.has(msg.messageID)) {
           socket.emit("seenMessage", msg.messageID, currentUserID, (response: SocketResponse) => {
-            console.log("Chat.tsx: Seen response:", response);
+            console.log("Chat.tsx: Seen response for messageID:", msg.messageID, "response:", response);
             if (response === "Đã cập nhật seenStatus chat đơn") {
               setMarkedAsSeen((prev) => new Set(prev).add(msg.messageID!));
             }
@@ -644,14 +733,14 @@ export default function Chat() {
       recallStatus: false,
     };
 
-    console.log("Sending message:", newMessage);
+    console.log("Chat.tsx: Sending message:", newMessage);
     setMessages((prev) => [...prev, newMessage]);
     setInputText("");
 
     socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
-      console.log("Server response for text message:", response);
+      console.log("Chat.tsx: Server response for text message:", response);
       if (response !== "Đã nhận") {
-        console.log("Message failed, response:", response);
+        console.log("Chat.tsx: Message failed, response:", response);
         Alert.alert("Lỗi", "Không thể gửi tin nhắn. Vui lòng thử lại.");
       }
     });
@@ -667,7 +756,9 @@ export default function Chat() {
             : msg
         )
       );
+      await saveMessageStatus(messageID, "deleted"); // Lưu trạng thái xóa vào AsyncStorage
       await deleteMessage(messageID, currentUserID);
+      console.log("Chat.tsx: Deleted messageID:", messageID);
       Alert.alert("Thành công", "Đã xóa tin nhắn");
     } catch (error) {
       console.error("Lỗi khi xóa tin nhắn:", error);
@@ -685,10 +776,13 @@ export default function Chat() {
   const handleRecallMessage = async (messageID: string) => {
     try {
       if (!currentUserID) return;
+      console.log("Chat.tsx: Attempting to recall messageID:", messageID);
       setMessages((prev) =>
         prev.map((msg) => (msg.messageID === messageID ? { ...msg, recallStatus: true } : msg))
       );
+      await saveMessageStatus(messageID, "recalled"); // Lưu trạng thái thu hồi vào AsyncStorage
       await recallMessage(messageID, currentUserID);
+      console.log("Chat.tsx: Recalled messageID:", messageID);
       Alert.alert("Thành công", "Đã thu hồi tin nhắn");
     } catch (error) {
       console.error("Lỗi khi thu hồi tin nhắn:", error);
@@ -697,6 +791,59 @@ export default function Chat() {
       );
       Alert.alert("Lỗi", "Không thể thu hồi tin nhắn. Vui lòng thử lại.");
     }
+  };
+
+  const handleForwardMessage = (messageID: string) => {
+    console.log("Chat.tsx: Opening forward modal for messageID:", messageID);
+    setForwardMessageID(messageID);
+    setSelectedForwardItems([]);
+    setShowForwardModal(true);
+  };
+
+  const handleSelectForwardItem = (id: string) => {
+    setSelectedForwardItems((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleShareMessages = () => {
+    if (!forwardMessageID || !currentUserID || selectedForwardItems.length === 0) {
+      Alert.alert("Lỗi", "Vui lòng chọn ít nhất một người hoặc nhóm để chuyển tiếp.");
+      return;
+    }
+
+    console.log("Chat.tsx: Sharing messageID:", forwardMessageID, "to:", selectedForwardItems);
+
+    selectedForwardItems.forEach((id) => {
+      const isGroup = groups.some((g) => g.groupID === id);
+      socket.emit(
+        "shareMessage",
+        {
+          messageID: forwardMessageID,
+          sharerID: currentUserID,
+          receiverID: isGroup ? null : id,
+          groupID: isGroup ? id : null,
+        },
+        (response: string) => {
+          console.log("Chat.tsx: Server response for shareMessage to", id, ":", response);
+          if (response !== "Đã nhận") {
+            console.error("Chat.tsx: Share message failed for", id, "response:", response);
+            Alert.alert("Lỗi", `Không thể chuyển tiếp đến ${isGroup ? "nhóm" : "người"} ${id}: ${response}`);
+          }
+        }
+      );
+    });
+
+    Alert.alert("Thành công", "Đã chuyển tiếp tin nhắn!");
+    setShowForwardModal(false);
+    setForwardMessageID(null);
+    setSelectedForwardItems([]);
+  };
+
+  const handlePinMessage = (messageID: string) => {
+    console.log("Chat.tsx: Pinning messageID:", messageID);
+    setPinnedMessageID(messageID);
+    Alert.alert("Thành công", "Đã ghim tin nhắn!");
   };
 
   const handleSendSticker = async (stickerUrl: string) => {
@@ -723,7 +870,7 @@ export default function Chat() {
     setShowStickerPicker(false);
 
     socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
-      console.log("Server response for sticker:", response);
+      console.log("Chat.tsx: Server response for sticker:", response);
       if (response !== "Đã nhận") {
         setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
         Alert.alert("Lỗi", "Không thể gửi sticker. Vui lòng thử lại.");
@@ -790,7 +937,7 @@ export default function Chat() {
       };
 
       socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
-        console.log("Server response for image:", response);
+        console.log("Chat.tsx: Server response for image:", response);
         if (response !== "Đã nhận") {
           setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
           Alert.alert("Lỗi", "Không thể gửi ảnh. Vui lòng thử lại.");
@@ -860,7 +1007,7 @@ export default function Chat() {
       };
 
       socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
-        console.log("Server response for video:", response);
+        console.log("Chat.tsx: Server response for video:", response);
         if (response !== "Đã nhận") {
           setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
           Alert.alert("Lỗi", "Không thể gửi video. Vui lòng thử lại.");
@@ -913,7 +1060,7 @@ export default function Chat() {
       };
 
       socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
-        console.log("Server response for file:", response);
+        console.log("Chat.tsx: Server response for file:", response);
         if (response !== "Đã nhận") {
           setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
           Alert.alert("Lỗi", "Không thể gửi file. Vui lòng thử lại.");
@@ -1014,7 +1161,7 @@ export default function Chat() {
       const newMessage: Message = {
         senderID: currentUserID,
         receiverID: userID,
-        messageTypeID: "type6",
+ messageTypeID: "type6",
         context: "",
         messageID,
         createdAt: new Date().toISOString(),
@@ -1025,7 +1172,7 @@ export default function Chat() {
       };
 
       socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
-        console.log("Server response for voice:", response);
+        console.log("Chat.tsx: Server response for voice:", response);
         if (response !== "Đã nhận") {
           setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
           Alert.alert("Lỗi", "Không thể gửi tin nhắn thoại. Vui lòng thử lại.");
@@ -1057,10 +1204,42 @@ export default function Chat() {
         userID={userID}
         onDeleteMessage={handleDeleteMessage}
         onRecallMessage={handleRecallMessage}
+        onForwardMessage={handleForwardMessage}
+        onPinMessage={handlePinMessage}
       />
     ),
     [currentUserID, userID]
   );
+
+  const getItemLayout = (data: ArrayLike<Message> | null | undefined, index: number) => ({
+    length: 100,
+    offset: 100 * index,
+    index,
+  });
+
+  const renderPinnedMessage = () => {
+    if (!pinnedMessageID) return null;
+    const pinnedMessage = messages.find((msg) => msg.messageID === pinnedMessageID);
+    if (!pinnedMessage) return null;
+
+    return (
+      <View style={styles.pinnedMessageContainer}>
+        <Text style={styles.pinnedMessageLabel}>Tin nhắn đã ghim</Text>
+        <Text style={styles.pinnedMessageText}>
+          {pinnedMessage.context.length > 50
+            ? pinnedMessage.context.substring(0, 50) + "..."
+            : pinnedMessage.context}
+        </Text>
+        <TouchableOpacity
+          style={styles.unpinButton}
+          onPress={() => setPinnedMessageID(null)}
+        >
+          <Ionicons name="pin-outline" size={16} color="#007AFF" />
+          <Text style={styles.unpinButtonText}>Bỏ ghim</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   if (loading) {
     return (
@@ -1085,15 +1264,17 @@ export default function Chat() {
         </TouchableOpacity>
       </View>
 
+      {renderPinnedMessage()}
       <FlatList
         ref={flatListRef}
         data={messages}
         keyExtractor={(item, index) => item.messageID || item.createdAt || `message-${index}`}
         renderItem={renderItem}
-        contentContainerStyle={{ padding: 10 }}
+        contentContainerStyle={{ padding: 10, paddingTop: pinnedMessageID ? 80 : 10 }}
         initialNumToRender={10}
         windowSize={5}
         extraData={messages}
+        getItemLayout={getItemLayout}
       />
 
       <View style={styles.inputContainer}>
@@ -1159,9 +1340,75 @@ export default function Chat() {
                 </Pressable>
               )}
             />
-            <TouchableOpacity style={styles.closeButton} onPress={() => setShowStickerPicker(false)}>
+            <Pressable style={styles.closeButton} onPress={() => setShowStickerPicker(false)}>
               <Text style={styles.closeButtonText}>Đóng</Text>
-            </TouchableOpacity>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showForwardModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowForwardModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.forwardModalContent}>
+            <Text style={styles.modalTitle}>Chuyển tiếp đến</Text>
+            <FlatList
+              data={[
+                ...contacts.map((c) => ({ type: "contact" as const, data: c })),
+                ...groups.map((g) => ({ type: "group" as const, data: g })),
+              ].slice(0, 50)}
+              keyExtractor={(item: ForwardItem) =>
+                item.type === "contact" ? `contact-${item.data.userID}` : `group-${item.data.groupID}`
+              }
+              renderItem={({ item }: { item: ForwardItem }) => {
+                const id = item.type === "contact" ? item.data.userID : item.data.groupID;
+                const isSelected = selectedForwardItems.includes(id);
+                return (
+                  <Pressable
+                    style={styles.forwardItem}
+                    onPress={() => handleSelectForwardItem(id)}
+                  >
+                    <Ionicons
+                      name={isSelected ? "checkbox-outline" : "square-outline"}
+                      size={24}
+                      color={isSelected ? "#007AFF" : "#666"}
+                      style={{ marginRight: 10 }}
+                    />
+                    {item.type === "contact" && item.data.avatar ? (
+                      <Image
+                        source={{ uri: item.data.avatar }}
+                        style={styles.forwardAvatar}
+                      />
+                    ) : (
+                      <View style={styles.forwardAvatarPlaceholder} />
+                    )}
+                    <Text style={styles.forwardItemText}>
+                      {item.type === "contact" ? item.data.username : item.data.groupName}
+                      {item.type === "contact" && item.data.userID === currentUserID ? " (Bạn)" : ""}
+                    </Text>
+                  </Pressable>
+                );
+              }}
+              style={{ maxHeight: "60%" }}
+            />
+            <View style={styles.forwardButtonContainer}>
+              <Pressable
+                style={[styles.closeButton, { backgroundColor: "#FF3B30" }]}
+                onPress={() => setShowForwardModal(false)}
+              >
+                <Text style={styles.closeButtonText}>Hủy</Text>
+              </Pressable>
+              <Pressable
+                style={styles.closeButton}
+                onPress={handleShareMessages}
+              >
+                <Text style={styles.closeButtonText}>Chuyển</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1179,16 +1426,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
   },
   username: { flex: 1, color: "#fff", fontSize: 18, fontWeight: "bold", marginLeft: 10 },
-  messageContainer: { flexDirection: "row", alignItems: "center", marginVertical: 5, paddingHorizontal: 10 },
-  myMessage: { justifyContent: "flex-end", alignSelf: "flex-end" },
-  otherMessage: { justifyContent: "flex-start", alignSelf: "flex-start" },
+  messageContainer: { flexDirection: "row", alignItems: "flex-end", marginVertical: 5, paddingHorizontal: 10 },
+  myMessage: { justifyContent: "flex-end" },
+  otherMessage: { justifyContent: "flex-start" },
   avatar: { width: 40, height: 40, borderRadius: 20, marginRight: 10 },
   avatarPlaceholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#ddd", marginRight: 10 },
-  messageBox: { backgroundColor: "#fff", padding: 10, borderRadius: 10 },
+  messageBoxWrapper: { flexDirection: "row", alignItems: "center" },
+  messageBox: { backgroundColor: "#fff", padding: 10, borderRadius: 10, maxWidth: "80%" },
   messageText: { fontSize: 16 },
   loadingText: { fontSize: 16, color: "#666", fontStyle: "italic" },
   seenText: { fontSize: 12, color: "#666", textAlign: "right" },
   recalledMessage: { fontStyle: "italic", color: "#666" },
+  forwardedLabel: { fontSize: 12, color: "#666", fontStyle: "italic" },
   sticker: { width: 100, height: 100, marginVertical: 5 },
   image: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
   videoContainer: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
@@ -1198,6 +1447,7 @@ const styles = StyleSheet.create({
   voiceContainer: { flexDirection: "row", alignItems: "center", marginVertical: 5 },
   voiceText: { fontSize: 16, color: "#007AFF", marginLeft: 10 },
   errorText: { fontSize: 14, color: "red", fontStyle: "italic" },
+  optionsButton: { padding: 10, marginHorizontal: 5 },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1209,18 +1459,33 @@ const styles = StyleSheet.create({
   },
   input: { flex: 1, fontSize: 16, marginHorizontal: 10 },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-  modalContainer: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.5)" },
-  stickerPicker: { backgroundColor: "#fff", height: "50%", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
-  stickerSearchInput: { borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 10, marginBottom: 10 },
-  stickerThumbnail: { width: 80, height: 80, margin: 5 },
-  closeButton: { backgroundColor: "#007AFF", padding: 10, borderRadius: 10, alignItems: "center", marginTop: 10 },
-  closeButtonText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     justifyContent: "center",
     alignItems: "center",
   },
+  forwardModalContent: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    padding: 20,
+    width: "90%",
+    maxHeight: "80%",
+    alignItems: "center",
+  },
+  modalTitle: { fontSize: 20, fontWeight: "bold", marginBottom: 20 },
+  forwardItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "#ddd",
+    width: "100%",
+  },
+  forwardAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 10 },
+  forwardAvatarPlaceholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#ddd", marginRight: 10 },
+  forwardItemText: { fontSize: 16, flex: 1 },
+  forwardButtonContainer: { flexDirection: "row", justifyContent: "space-between", width: "100%", marginTop: 10 },
   messageOptionsContainer: {
     backgroundColor: "white",
     borderRadius: 10,
@@ -1237,4 +1502,47 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginLeft: 10,
   },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "flex-end",
+  },
+  stickerPicker: {
+    backgroundColor: "#fff",
+    height: "50%",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+  },
+  stickerSearchInput: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+  },
+  stickerThumbnail: { width: 80, height: 80, margin: 5 },
+  closeButton: {
+    backgroundColor: "#007AFF",
+    padding: 10,
+    borderRadius: 10,
+    alignItems: "center",
+    width: "45%",
+  },
+  closeButtonText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
+  pinnedMessageContainer: {
+    backgroundColor: "#e5e5ea",
+    padding: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#ddd",
+    position: "absolute",
+    top: 60,
+    left: 0,
+    right: 0,
+    zIndex: 1000,
+  },
+  pinnedMessageLabel: { fontSize: 12, color: "#666", fontWeight: "bold" },
+  pinnedMessageText: { fontSize: 14, color: "#000", marginVertical: 5 },
+  unpinButton: { flexDirection: "row", alignItems: "center" },
+  unpinButtonText: { fontSize: 12, color: "#007AFF", marginLeft: 5 },
 });

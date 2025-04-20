@@ -18,16 +18,36 @@ export interface Message {
   recallStatus?: boolean;
 }
 
-export const fetchMessages = async (receiverID: string): Promise<Message[]> => {
+export interface Contact {
+  userID: string;
+  username: string;
+  avatar?: string;
+}
+
+export interface Group {
+  groupID: string;
+  groupName: string;
+  avatar?: string;
+  members?: string[];
+}
+
+export const fetchMessages = async (receiverID: string, isGroup: boolean = false): Promise<Message[]> => {
   try {
     const userData = await AsyncStorage.getItem("user");
     if (!userData) throw new Error("Không tìm thấy thông tin người dùng.");
 
     const user = JSON.parse(userData);
     const userID1 = user.userID;
-    if (!userID1 || !receiverID) throw new Error("Thiếu userID hoặc receiverID.");
+    if (!userID1) throw new Error("Thiếu userID.");
 
-    const response = await api.get(`/api/message/${userID1}/${receiverID}`);
+    let response;
+    if (isGroup) {
+      if (!receiverID) throw new Error("Thiếu groupID.");
+      response = await api.get(`/api/message/group/${receiverID}`);
+    } else {
+      if (!receiverID) throw new Error("Thiếu receiverID.");
+      response = await api.get(`/api/message/${userID1}/${receiverID}`);
+    }
     return response.data || [];
   } catch (error: any) {
     console.error("Lỗi khi lấy tin nhắn:", error.message);
@@ -35,14 +55,24 @@ export const fetchMessages = async (receiverID: string): Promise<Message[]> => {
   }
 };
 
-export const fetchGroupMessages = async (groupID: string): Promise<Message[]> => {
+export const fetchContacts = async (userID: string): Promise<Contact[]> => {
   try {
-    if (!groupID) throw new Error("Thiếu groupID.");
-
-    const response = await api.get(`/api/message/group/${groupID}`);
+    if (!userID) throw new Error("Thiếu userID.");
+    const response = await api.get(`/api/contacts/${userID}`);
     return response.data || [];
   } catch (error: any) {
-    console.error("Lỗi khi lấy tin nhắn nhóm:", error.message);
+    console.error("Lỗi khi lấy danh bạ:", error.message);
+    return [];
+  }
+};
+
+export const fetchUserGroups = async (userID: string): Promise<Group[]> => {
+  try {
+    if (!userID) throw new Error("Thiếu userID.");
+    const response = await api.get(`/api/groups/${userID}`);
+    return response.data || [];
+  } catch (error: any) {
+    console.error("Lỗi khi lấy danh sách nhóm:", error.message);
     return [];
   }
 };

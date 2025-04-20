@@ -10,7 +10,7 @@ export default function AddContact() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [allUsers, setAllUsers] = useState<Contact[]>([]);
-  const [filteredUsers, setFilteredUsers] = useState<Contact[]>([]);
+  const [filteredUsers, setFilteredUsers] = useState<Contact[]>([]); // Khởi tạo rỗng
   const [currentContacts, setCurrentContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [userID, setUserID] = useState<string | null>(null);
@@ -36,7 +36,7 @@ export default function AddContact() {
           (u) => u.userID !== user.userID && !contacts.some((c) => c.userID === u.userID)
         );
         setAllUsers(nonFriends);
-        setFilteredUsers(nonFriends);
+        // Không gán filteredUsers ở đây
       } catch (error: any) {
         Alert.alert("Lỗi", error.message || "Không thể tải dữ liệu.");
       } finally {
@@ -50,7 +50,7 @@ export default function AddContact() {
   const handleSearch = (text: string) => {
     setSearchQuery(text);
     if (text.trim() === "") {
-      setFilteredUsers(allUsers);
+      setFilteredUsers([]); // Nếu không có query, đặt filteredUsers rỗng
     } else {
       const filtered = allUsers.filter(
         (user) =>

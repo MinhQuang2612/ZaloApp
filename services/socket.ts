@@ -1,12 +1,12 @@
 import { io, Socket } from "socket.io-client";
 import { getAccessToken, refreshAccessToken } from "../services/auth";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
+const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://192.168.0.184:3000";
 console.log("Socket API URL:", API_URL);
 
 const socket: Socket = io(API_URL, {
   reconnection: true,
-  reconnectionAttempts: 10,
+  reconnectionAttempts: 5,
   reconnectionDelay: 1000,
   timeout: 30000,
   autoConnect: false,
@@ -14,8 +14,15 @@ const socket: Socket = io(API_URL, {
   auth: {},
 });
 
-// Hàm kết nối socket với retry logic
+let isConnecting = false;
+
 export const connectSocket = async (): Promise<void> => {
+  if (isConnecting || socket.connected) {
+    console.log("Socket already connected or connecting:", socket.id);
+    return;
+  }
+
+  isConnecting = true;
   try {
     let token = await getAccessToken();
     if (!token) {
@@ -31,18 +38,20 @@ export const connectSocket = async (): Promise<void> => {
     socket.auth = { token };
     console.log("Socket auth updated with token:", socket.auth);
 
-    if (!socket.connected) {
-      console.log("Connecting to socket...");
-      socket.connect();
-    } else {
-      console.log("Socket already connected:", socket.id);
-    }
+    console.log("Connecting to socket...");
+    socket.connect();
   } catch (error) {
     console.error("Failed to connect socket:", error);
+  } finally {
+    isConnecting = false;
   }
 };
 
-// Ngắt kết nối socket
+export const joinGroupRoom = (groupID: string) => {
+  socket.emit("joinGroupRoom", groupID);
+  console.log("Joined group room:", groupID);
+};
+
 export const disconnectSocket = () => {
   if (socket.connected) {
     console.log("Disconnecting socket...");
@@ -50,15 +59,13 @@ export const disconnectSocket = () => {
   }
 };
 
-// Xử lý sự kiện kết nối
 socket.on("connect", () => {
   console.log("Socket connected:", socket.id);
 });
 
-// Xử lý lỗi kết nối
 socket.on("connect_error", async (error) => {
   console.log("Socket connection error:", error.message);
-  if (error.message === "Invalid token") {
+  if (error.message === "Invalid token" && !isConnecting) {
     try {
       console.log("Attempting to refresh token...");
       const refreshedTokens = await refreshAccessToken();
@@ -67,27 +74,25 @@ socket.on("connect_error", async (error) => {
         return;
       }
       socket.auth = { token: refreshedTokens.accessToken };
-      socket.connect();
+      connectSocket();
     } catch (refreshError) {
       console.error("Failed to refresh token:", refreshError);
     }
   }
 });
 
-// Xử lý ngắt kết nối và tự động reconnect
 socket.on("disconnect", (reason) => {
   console.log("Socket disconnected:", reason);
-  if (reason === "io server disconnect" || reason === "io client disconnect") {
+  if (reason === "io server disconnect" && !isConnecting) {
     connectSocket();
   }
 });
 
-// Hàm xóa tin nhắn
 export const deleteMessage = (messageID: string, userID: string): Promise<boolean> => {
   return new Promise((resolve, reject) => {
-    socket.emit("deleteMessage", messageID, userID, (response: string) => {
+    socket.emit("deleteMessage", { messageID, userID }, (response: string) => {
       console.log("Delete message response:", response);
-      if (response === "Đã xóa tin nhắn thành công") {
+      if (response === "Xóa tin nhắn thành công") {
         resolve(true);
       } else {
         reject(new Error(response));
@@ -96,10 +101,9 @@ export const deleteMessage = (messageID: string, userID: string): Promise<boolea
   });
 };
 
-// Hàm thu hồi tin nhắn
 export const recallMessage = (messageID: string, userID: string): Promise<boolean> => {
   return new Promise((resolve, reject) => {
-    socket.emit("recallMessage", messageID, userID, (response: string) => {
+    socket.emit("recallMessage", { messageID, userID }, (response: string) => {
       console.log("Recall message response:", response);
       if (response === "Thu hồi tin nhắn thành công") {
         resolve(true);
@@ -110,15 +114,13 @@ export const recallMessage = (messageID: string, userID: string): Promise<boolea
   });
 };
 
-// Hàm để đăng ký lại listener từ các component
 export const registerSocketListeners = (listeners: { event: string; handler: (...args: any[]) => void }[]) => {
   listeners.forEach(({ event, handler }) => {
-    socket.off(event); // Xóa listener cũ để tránh trùng lặp
+    socket.off(event);
     socket.on(event, handler);
   });
 };
 
-// Hàm để xóa listener khi component unmount
 export const removeSocketListeners = (events: string[]) => {
   events.forEach((event) => socket.off(event));
 };
