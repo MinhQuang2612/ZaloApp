@@ -512,18 +512,7 @@ export default function Home() {
         event: "connect",
         handler: () => {
           console.log("Home.tsx: Socket connected:", socket.id);
-          if (currentUserID) {
-            socket.emit("joinUserRoom", currentUserID);
-            contacts.forEach((contact) => {
-              if (!joinedContactRooms.current.has(contact.userID)) {
-                socket.emit("joinUserRoom", contact.userID);
-                joinedContactRooms.current.add(contact.userID);
-              }
-            });
-            groups.forEach((group) => {
-              socket.emit("joinGroupRoom", group.groupID);
-            });
-          }
+          joinRooms();
         },
       },
       {
@@ -538,6 +527,27 @@ export default function Home() {
     return () => {
       removeSocketListeners(listeners.map((l) => l.event));
     };
+  }, [currentUserID, contacts, groups]);
+
+  const joinRooms = useCallback(() => {
+    if (currentUserID) {
+      socket.emit("joinUserRoom", currentUserID);
+      console.log("Home.tsx: Joined user room:", currentUserID);
+
+      joinedContactRooms.current.clear();
+      contacts.forEach((contact) => {
+        if (!joinedContactRooms.current.has(contact.userID)) {
+          socket.emit("joinUserRoom", contact.userID);
+          joinedContactRooms.current.add(contact.userID);
+          console.log("Home.tsx: Joined contact room:", contact.userID);
+        }
+      });
+
+      groups.forEach((group) => {
+        socket.emit("joinGroupRoom", group.groupID);
+        console.log("Home.tsx: Joined group room:", group.groupID);
+      });
+    }
   }, [currentUserID, contacts, groups]);
 
   const toggleMember = (userID: string) => {
@@ -602,7 +612,6 @@ export default function Home() {
 
         await loadMessages(userID);
         await connectSocket();
-        setupSocketListeners();
       } catch (error) {
         console.error("Lỗi khi khởi tạo:", error);
       } finally {
@@ -626,23 +635,35 @@ export default function Home() {
         "disconnect",
       ]);
     };
-  }, [loadMessages, setupSocketListeners]);
+  }, [loadMessages]);
 
-  // Tự động load lại khi màn hình được focus
   useFocusEffect(
     useCallback(() => {
       if (currentUserID) {
         console.log("Home.tsx: Screen focused, reloading messages for user:", currentUserID);
-        // Làm sạch processedMessageIDs để không bỏ qua tin nhắn mới
         processedMessageIDs.current.clear();
         console.log("Home.tsx: Cleared processedMessageIDs");
         loadMessages(currentUserID);
+
+        // Remove previous listeners and set up new ones
+        removeSocketListeners([
+          "receiveMessage",
+          "updateSingleChatSeenStatus",
+          "updateGroupChatSeenStatus",
+          "deletedSingleMessage",
+          "recalledSingleMessage",
+          "deletedGroupMessage",
+          "recalledGroupMessage",
+          "connect",
+          "disconnect",
+        ]);
+        setupSocketListeners();
       }
 
       return () => {
         console.log("Home.tsx: Screen unfocused");
       };
-    }, [currentUserID, loadMessages])
+    }, [currentUserID, loadMessages, setupSocketListeners])
   );
 
   const onRefresh = async () => {
