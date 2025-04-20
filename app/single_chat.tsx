@@ -380,6 +380,31 @@ export default function Chat() {
   const insets = useSafeAreaInsets();
   const GIPHY_API_KEY = "ahUloRbYoMUhR2aBUDO2iyNObLH8dnMa";
 
+  // Load pinned message from AsyncStorage
+  const loadPinnedMessage = async (chatID: string) => {
+    try {
+      const pinnedID = await AsyncStorage.getItem(`pinnedMessage_${chatID}`);
+      if (pinnedID) {
+        setPinnedMessageID(pinnedID);
+      }
+    } catch (error) {
+      console.error("Lỗi khi tải pinned message:", error);
+    }
+  };
+
+  // Save pinned message to AsyncStorage
+  const savePinnedMessage = async (chatID: string, messageID: string | null) => {
+    try {
+      if (messageID) {
+        await AsyncStorage.setItem(`pinnedMessage_${chatID}`, messageID);
+      } else {
+        await AsyncStorage.removeItem(`pinnedMessage_${chatID}`);
+      }
+    } catch (error) {
+      console.error("Lỗi khi lưu pinned message:", error);
+    }
+  };
+
   useEffect(() => {
     return () => {
       const cleanupRecording = async () => {
@@ -590,11 +615,7 @@ export default function Chat() {
       const messageStatuses = await AsyncStorage.getItem(statusKey);
       const statuses = messageStatuses ? JSON.parse(messageStatuses) : {};
 
-      let loadedMessages: Message[] = [];
-      if (cachedMessages) {
-        loadedMessages = JSON.parse(cachedMessages);
-      }
-
+      // Fetch messages from API
       const data = await fetchMessages(targetUserID);
       const updatedData = data.map((message) => {
         if (
@@ -608,6 +629,7 @@ export default function Chat() {
         message.deleteStatusByUser = message.deleteStatusByUser || [];
         message.recallStatus = message.recallStatus || false;
 
+        // Apply status from AsyncStorage if exists
         if (statuses[message.messageID!]) {
           if (statuses[message.messageID!] === "deleted") {
             message.deleteStatusByUser = [...(message.deleteStatusByUser || []), currentUserID!];
@@ -619,14 +641,19 @@ export default function Chat() {
         return message;
       });
 
-      if (JSON.stringify(updatedData) !== JSON.stringify(loadedMessages)) {
-        setMessages(updatedData);
-        await AsyncStorage.setItem(cacheKey, JSON.stringify(updatedData));
-      } else {
-        setMessages(loadedMessages);
-      }
+      // Update cache and state
+      setMessages(updatedData);
+      await AsyncStorage.setItem(cacheKey, JSON.stringify(updatedData));
+      console.log("Chat.tsx: Loaded messages from API, updated cache");
     } catch (error) {
       console.error("Lỗi khi lấy tin nhắn:", error);
+      // Fallback to cached messages if API fails
+      const cacheKey = `messages_${targetUserID}`;
+      const cachedMessages = await AsyncStorage.getItem(cacheKey);
+      if (cachedMessages) {
+        setMessages(JSON.parse(cachedMessages));
+        console.log("Chat.tsx: Loaded messages from cache");
+      }
     }
   };
 
@@ -667,6 +694,7 @@ export default function Chat() {
 
       await loadMessagesWithCache(userID);
       await loadContactsAndGroups(userIDValue);
+      await loadPinnedMessage(userID); // Load pinned message
       await connectSocket();
       setupSocketListeners();
       setLoading(false);
@@ -834,10 +862,27 @@ export default function Chat() {
     setSelectedForwardItems([]);
   };
 
-  const handlePinMessage = (messageID: string) => {
-    console.log("Chat.tsx: Pinning messageID:", messageID);
-    setPinnedMessageID(messageID);
-    Alert.alert("Thành công", "Đã ghim tin nhắn!");
+  const handlePinMessage = async (messageID: string) => {
+    try {
+      console.log("Chat.tsx: Pinning messageID:", messageID);
+      setPinnedMessageID(messageID);
+      await savePinnedMessage(userID!, messageID);
+      Alert.alert("Thành công", "Đã ghim tin nhắn!");
+    } catch (error) {
+      console.error("Lỗi khi ghim tin nhắn:", error);
+      Alert.alert("Lỗi", "Không thể ghim tin nhắn. Vui lòng thử lại.");
+    }
+  };
+
+  const handleUnpinMessage = async () => {
+    try {
+      setPinnedMessageID(null);
+      await savePinnedMessage(userID!, null);
+      Alert.alert("Thành công", "Đã bỏ ghim tin nhắn!");
+    } catch (error) {
+      console.error("Lỗi khi bỏ ghim tin nhắn:", error);
+      Alert.alert("Lỗi", "Không thể bỏ ghim tin nhắn. Vui lòng thử lại.");
+    }
   };
 
   const handleSendSticker = async (stickerUrl: string) => {
@@ -1214,24 +1259,28 @@ export default function Chat() {
   const renderPinnedMessage = () => {
     if (!pinnedMessageID) return null;
     const pinnedMessage = messages.find((msg) => msg.messageID === pinnedMessageID);
-    if (!pinnedMessage || pinnedMessage.recallStatus || pinnedMessage.deleteStatusByUser?.includes(currentUserID!)) return null;
+    if (!pinnedMessage || pinnedMessage.recallStatus || pinnedMessage.deleteStatusByUser?.includes(currentUserID!)) {
+      setPinnedMessageID(null); // Clear invalid pinned message
+      savePinnedMessage(userID!, null);
+      return null;
+    }
 
     return (
-      <View style={styles.pinnedMessageContainer}>
+      <TouchableOpacity
+        style={styles.pinnedMessageContainer}
+        onPress={handleUnpinMessage}
+      >
         <Text style={styles.pinnedMessageLabel}>Tin nhắn đã ghim</Text>
         <Text style={styles.pinnedMessageText}>
           {pinnedMessage.context.length > 50
             ? pinnedMessage.context.substring(0, 50) + "..."
             : pinnedMessage.context}
         </Text>
-        <TouchableOpacity
-          style={styles.unpinButton}
-          onPress={() => setPinnedMessageID(null)}
-        >
+        <View style={styles.unpinButton}>
           <Ionicons name="pin-outline" size={16} color="#007AFF" />
           <Text style={styles.unpinButtonText}>Bỏ ghim</Text>
-        </TouchableOpacity>
-      </View>
+        </View>
+      </TouchableOpacity>
     );
   };
 
@@ -1245,7 +1294,7 @@ export default function Chat() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.navbar, { paddingTop: Platform.OS === "ios" ? insets.top : 3, paddingBottom: 8 }]}>
+      <View style={[styles.navbar, { paddingTop: insets.top, paddingBottom: 8, zIndex: 1000 }]}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -1264,14 +1313,17 @@ export default function Chat() {
         data={messages}
         keyExtractor={(item, index) => item.messageID || item.createdAt || `message-${index}`}
         renderItem={renderItem}
-        contentContainerStyle={{ padding: 10, paddingTop: pinnedMessageID ? 80 : 10 }}
+        contentContainerStyle={{
+          padding: 10,
+          paddingTop: pinnedMessageID ? 110 + insets.top : 10 + insets.top,
+        }}
         initialNumToRender={10}
         windowSize={5}
         extraData={messages}
         getItemLayout={getItemLayout}
       />
 
-      <View style={styles.inputContainer}>
+      <View style={[styles.inputContainer, { paddingBottom: insets.bottom }]}>
         <TouchableOpacity onPress={() => setShowStickerPicker(true)}>
           <Ionicons name="happy-outline" size={24} color="#666" />
         </TouchableOpacity>
@@ -1435,7 +1487,7 @@ const styles = StyleSheet.create({
   sticker: { width: 100, height: 100, marginVertical: 5 },
   image: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
   videoContainer: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
-  video: { width: "100%", height: "100%", borderRadius: 10, resizeMode: "contain" },
+  video: { width: "100%", height: "100%", borderRadius: 10 },
   fileContainer: { flexDirection: "row", alignItems: "center", marginVertical: 5 },
   fileText: { fontSize: 16, color: "#007AFF", marginLeft: 10 },
   voiceContainer: { flexDirection: "row", alignItems: "center", marginVertical: 5 },
@@ -1529,11 +1581,7 @@ const styles = StyleSheet.create({
     padding: 10,
     borderBottomWidth: 1,
     borderBottomColor: "#ddd",
-    position: "absolute",
-    top: 60,
-    left: 0,
-    right: 0,
-    zIndex: 1000,
+    zIndex: 999,
   },
   pinnedMessageLabel: { fontSize: 12, color: "#666", fontWeight: "bold" },
   pinnedMessageText: { fontSize: 14, color: "#000", marginVertical: 5 },
