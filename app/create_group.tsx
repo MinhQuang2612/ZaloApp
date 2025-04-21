@@ -13,15 +13,18 @@ import {
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { createGroup } from "../services/group";
+import { createGroup, fetchGroupMembers } from "../services/group";
 import { fetchContacts, Contact } from "../services/contacts";
 import { addGroupMember } from "../services/socket";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import api from "../services/api";
 
 export default function CreateGroup() {
   const [groupName, setGroupName] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [filteredContacts, setFilteredContacts] = useState<Contact[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -46,6 +49,7 @@ export default function CreateGroup() {
 
         const contactsData = await fetchContacts(userID);
         setContacts(contactsData);
+        setFilteredContacts(contactsData);
       } catch (error) {
         console.error("Lỗi khi tải danh bạ:", error);
         Alert.alert("Lỗi", "Không thể tải danh bạ.");
@@ -54,6 +58,13 @@ export default function CreateGroup() {
 
     loadContacts();
   }, []);
+
+  useEffect(() => {
+    const filtered = contacts.filter((contact) =>
+      contact.username.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    setFilteredContacts(filtered);
+  }, [searchQuery, contacts]);
 
   const toggleMember = (userID: string) => {
     setSelectedMembers((prev) =>
@@ -67,7 +78,7 @@ export default function CreateGroup() {
       return;
     }
 
-    if (!selectedMembers.length) {
+    if (selectedMembers.length === 0) {
       Alert.alert("Lỗi", "Vui lòng chọn ít nhất một thành viên.");
       return;
     }
@@ -89,24 +100,73 @@ export default function CreateGroup() {
         return;
       }
 
+      // Tạo nhóm
       const newGroup = await createGroup({ groupName, userID });
+      const groupID = newGroup.groupID;
+      console.log(`Đã tạo nhóm ${groupID} với tên ${groupName}`);
 
-      // Thêm các thành viên được chọn vào nhóm
+      // Thêm thành viên
+      let failedMembers: string[] = [];
       for (const memberID of selectedMembers) {
-        await addGroupMember(memberID, newGroup.groupID);
+        if (memberID !== userID) {
+          try {
+            const response = await addGroupMember(memberID, groupID);
+            console.log(`Đã thêm thành viên ${memberID}: ${response}`);
+          } catch (error: any) {
+            if (error.message === "user đã là thành viên của nhóm này") {
+              console.log(`Thành viên ${memberID} đã là thành viên, bỏ qua.`);
+            } else {
+              failedMembers.push(memberID);
+              console.warn(`Không thể thêm thành viên ${memberID}: ${error.message}`);
+            }
+          }
+        }
       }
 
-      Alert.alert("Thành công", "Nhóm đã được tạo thành công!");
+      // Lấy danh sách thành viên
+      let members: any[] = [];
+      let memberCount = 0;
+      try {
+        members = await fetchGroupMembers(groupID);
+        memberCount = members.length;
+      } catch (error) {
+        console.error("Lỗi khi lấy thành viên nhóm, thử lấy từ API /api/group:", error);
+        const allGroupsResponse = await api.get(`/api/group`);
+        const allGroups = allGroupsResponse.data.data || [];
+        const groupDetail = allGroups.find((g: { groupID: string }) => g.groupID === groupID);
+        memberCount = groupDetail?.totalMembers || selectedMembers.length + 1; // +1 cho người tạo
+      }
+      console.log(`Nhóm ${groupID} có ${memberCount} thành viên:`, members);
+
+      // Hiển thị danh sách thành viên trong thông báo
+      let memberNames = "Không lấy được danh sách thành viên.";
+      if (members.length > 0) {
+        memberNames = members
+          .map((member: { userID: string }) => {
+            const contact = contacts.find((c) => c.userID === member.userID);
+            return contact?.username || member.userID;
+          })
+          .join(", ");
+      }
+
+      if (failedMembers.length > 0) {
+        const failedNames = failedMembers
+          .map((id) => contacts.find((c) => c.userID === id)?.username || id)
+          .join(", ");
+        Alert.alert(
+          "Cảnh báo",
+          `Nhóm đã được tạo với ${memberCount} thành viên: ${memberNames}. Không thể thêm: ${failedNames}.`
+        );
+      } else {
+        Alert.alert(
+          "Thành công",
+          `Nhóm đã được tạo với ${memberCount} thành viên: ${memberNames}!`
+        );
+      }
       router.replace("/home");
     } catch (error: any) {
       console.error("Lỗi khi tạo nhóm:", error);
-      // Bỏ qua lỗi "user đã là thành viên của nhóm này"
-      if (error.message === "user đã là thành viên của nhóm này") {
-        Alert.alert("Thành công", "Nhóm đã được tạo thành công!");
-        router.replace("/home");
-      } else {
-        Alert.alert("Lỗi", error.message || "Đã có lỗi xảy ra. Vui lòng thử lại.");
-      }
+      Alert.alert("Lỗi", error.message || "Đã có lỗi xảy ra. Vui lòng thử lại.");
     } finally {
       setLoading(false);
     }
@@ -138,7 +198,7 @@ export default function CreateGroup() {
         styles.container,
         {
           paddingTop: Platform.OS === "ios" ? insets.top : 3,
-          paddingBottom: 8,
+          paddingBottom: insets.bottom || 8,
         },
       ]}
     >
@@ -157,13 +217,28 @@ export default function CreateGroup() {
           onChangeText={setGroupName}
           editable={!loading}
         />
-        <Text style={styles.label}>Chọn thành viên</Text>
-        <FlatList
-          data={contacts}
-          renderItem={renderContactItem}
-          keyExtractor={(item) => item.userID}
-          style={styles.contactList}
+        <Text style={styles.label}>Tìm kiếm thành viên</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Nhập tên để tìm kiếm"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          editable={!loading}
         />
+        <Text style={styles.label}>Chọn thành viên</Text>
+        <Text style={styles.selectedCount}>Đã chọn: {selectedMembers.length}</Text>
+        {filteredContacts.length === 0 ? (
+          <Text style={styles.noContacts}>
+            {searchQuery ? "Không tìm thấy thành viên." : "Không có danh bạ."}
+          </Text>
+        ) : (
+          <FlatList
+            data={filteredContacts}
+            renderItem={renderContactItem}
+            keyExtractor={(item) => item.userID}
+            style={styles.contactList}
+          />
+        )}
         <TouchableOpacity
           style={[styles.createButton, loading ? styles.createButtonDisabled : {}]}
           onPress={handleCreateGroup}
@@ -200,10 +275,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 20,
   },
-  contactList: {
-    maxHeight: 300,
-    marginBottom: 20,
-  },
+  contactList: { flex: 1, marginBottom: 20 },
   contactItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -211,10 +283,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#eee",
   },
-  contactName: {
-    flex: 1,
-    fontSize: 16,
-  },
+  contactName: { flex: 1, fontSize: 16 },
   checkbox: {
     width: 24,
     height: 24,
@@ -227,18 +296,15 @@ const styles = StyleSheet.create({
   checkboxSelected: {
     backgroundColor: "#007AFF",
   },
-  checkmark: {
-    color: "#fff",
-    fontSize: 16,
-  },
+  checkmark: { color: "#fff", fontSize: 16 },
   createButton: {
     backgroundColor: "#007AFF",
     padding: 15,
     borderRadius: 10,
     alignItems: "center",
   },
-  createButtonDisabled: {
-    backgroundColor: "#99C2FF",
-  },
+  createButtonDisabled: { backgroundColor: "#99C2FF" },
   createButtonText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
+  noContacts: { fontSize: 16, color: "#666", textAlign: "center", marginTop: 20 },
+  selectedCount: { fontSize: 14, color: "#666", marginBottom: 10 },
 });

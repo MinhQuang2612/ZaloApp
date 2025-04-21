@@ -16,7 +16,9 @@ import { fetchMessages, Message } from "../services/message";
 import { fetchContacts, Contact } from "../services/contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import socket, { connectSocket, registerSocketListeners, removeSocketListeners } from "../services/socket";
-import { fetchUserGroups, Group } from "../services/group";
+import { fetchUserGroups, fetchGroupMembers, Group } from "../services/group";
+import { Ionicons } from "@expo/vector-icons";
+import api from "../services/api";
 
 type HomeMessage = {
   senderID: string;
@@ -43,6 +45,7 @@ export default function Home() {
   const [messages, setMessages] = useState<CombinedMessage[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [groupMembersCount, setGroupMembersCount] = useState<{ [key: string]: number }>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentUserID, setCurrentUserID] = useState<string | null>(null);
@@ -120,10 +123,6 @@ export default function Home() {
     return contact?.avatar || null;
   };
 
-  const getGroupAvatar = (_groupID: string): string | null => {
-    return null;
-  };
-
   const loadMessages = useCallback(async (userID: string) => {
     if (!isMounted.current) return;
     console.log("Home.tsx: loadMessages called at", new Date().toISOString());
@@ -134,6 +133,22 @@ export default function Home() {
 
       const contactsData = await fetchContacts(userID);
       const userGroups = await fetchUserGroups(userID);
+
+      // Lấy số thành viên cho mỗi nhóm
+      const membersCount: { [key: string]: number } = {};
+      const allGroupsResponse = await api.get(`/api/group`);
+      const allGroups = allGroupsResponse.data.data || [];
+      for (const group of userGroups) {
+        try {
+          const members = await fetchGroupMembers(group.groupID);
+          membersCount[group.groupID] = members.length;
+        } catch (error) {
+          console.error(`Lỗi khi lấy thành viên nhóm ${group.groupID}:`, error);
+          const groupDetail = allGroups.find((g: { groupID: string }) => g.groupID === group.groupID);
+          membersCount[group.groupID] = groupDetail?.totalMembers || 0;
+        }
+      }
+      setGroupMembersCount(membersCount);
 
       setContacts((prev) =>
         JSON.stringify(prev) !== JSON.stringify(contactsData) ? contactsData : prev
@@ -517,10 +532,17 @@ export default function Home() {
       },
       {
         event: "newMember",
-        handler: (userID: string) => {
-          console.log("Home.tsx: Thành viên mới được thêm:", userID);
+        handler: async (data: { userID: string; groupID: string }) => {
+          if (!isMounted.current) return;
+          console.log("Home.tsx: Thành viên mới được thêm:", data);
           if (currentUserID) {
-            loadMessages(currentUserID);
+            // Làm mới danh sách nhóm
+            await loadMessages(currentUserID);
+            // Cập nhật cache nhóm
+            const cacheKey = `cachedUserGroups_${currentUserID}`;
+            const userGroups = await fetchUserGroups(currentUserID);
+            await AsyncStorage.setItem(cacheKey, JSON.stringify(userGroups));
+            console.log("Đã cập nhật cache nhóm sau newMember:", cacheKey);
           }
         },
       },
@@ -652,7 +674,9 @@ export default function Home() {
             {avatarUri ? (
               <Image source={{ uri: avatarUri }} style={styles.avatar} />
             ) : (
-              <View style={styles.avatarPlaceholder} />
+              <View style={styles.avatarPlaceholder}>
+                <Ionicons name="person" size={30} color="#666" />
+              </View>
             )}
             <View style={styles.messageContent}>
               <Text style={styles.name}>{getUserName(msg.senderID)}</Text>
@@ -675,9 +699,13 @@ export default function Home() {
             style={styles.item}
             onPress={() => router.push({ pathname: "/group_chat", params: { groupID: groupMsg.groupID } })}
           >
-            <View style={styles.avatarPlaceholder} />
+            <View style={styles.avatarPlaceholder}>
+              <Ionicons name="people" size={30} color="#666" />
+            </View>
             <View style={styles.messageContent}>
-              <Text style={styles.name}>{groupMsg.groupName}</Text>
+              <Text style={styles.name}>
+                {groupMsg.groupName} ({groupMembersCount[groupMsg.groupID] || 0} thành viên)
+              </Text>
               <Text style={styles.message}>{getMessagePreview(groupMsg)}</Text>
             </View>
             <View style={styles.rightContainer}>
@@ -692,7 +720,7 @@ export default function Home() {
         );
       }
     },
-    [contacts, groups]
+    [contacts, groups, groupMembersCount]
   );
 
   if (loading) {
@@ -747,6 +775,8 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     backgroundColor: "#ddd",
     marginRight: 15,
+    justifyContent: "center",
+    alignItems: "center",
   },
   messageContent: {
     flex: 1,
