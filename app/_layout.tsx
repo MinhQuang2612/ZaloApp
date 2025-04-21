@@ -20,6 +20,7 @@ export default function RootLayout() {
       <Stack.Screen name="group_chat" options={{headerShown: false}}/>
       <Stack.Screen name="create_group" options={{headerShown: false}}/>
       <Stack.Screen name="add_contact" options={{headerShown: false}}/>
+      <Stack.Screen name="user_profile" options={{headerShown: false}}/>
     </Stack>
   );
 }

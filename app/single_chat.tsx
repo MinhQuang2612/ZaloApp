@@ -1317,12 +1317,19 @@ export default function Chat() {
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
+        <TouchableOpacity
+        onPress={() => router.push({ pathname: "/user_profile", params: { userID } })}
+      >
         <Text style={styles.username}>{receiverName}</Text>
+      </TouchableOpacity>
         <TouchableOpacity>
-          <Ionicons name="call-outline" size={24} color="#fff" style={{ marginRight: 18 }} />
+          <Ionicons name="call-outline" size={24} color="#fff" style={{ marginLeft: 150 }} />
         </TouchableOpacity>
         <TouchableOpacity>
-          <Ionicons name="videocam-outline" size={24} color="#fff" />
+          <Ionicons name="videocam-outline" size={27} color="#fff" style={{ marginLeft: 20 }}/>
+        </TouchableOpacity>
+        <TouchableOpacity>
+          <Ionicons name="menu" size={27} color="#fff" style={{ marginLeft: 20 }}/>
         </TouchableOpacity>
       </View>
 

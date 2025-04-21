@@ -7,6 +7,8 @@ export interface Contact {
   username: string;
   avatar?: string;
   phoneNumber?: string;
+  gmail?: string;
+  DOB?: string;
 }
 
 // Hàm lấy danh sách tất cả liên hệ của người dùng
@@ -25,6 +27,8 @@ export const fetchContacts = async (userID: string): Promise<Contact[]> => {
             username: contactDetails.data.username || "Không xác định",
             avatar: contactDetails.data.avatar,
             phoneNumber: contactDetails.data.phoneNumber || "Không có số điện thoại",
+            DOB: contactDetails.data.DOB || "Chưa cập nhật", // Thêm DOB
+            gmail: contactDetails.data.gmail || "Chưa liên kết", // Thêm gmail
           };
         } catch (error) {
           console.error(`Lỗi khi lấy thông tin user ${contact.userID}:`, error);
@@ -33,6 +37,8 @@ export const fetchContacts = async (userID: string): Promise<Contact[]> => {
             username: "Không xác định",
             avatar: undefined,
             phoneNumber: "Không có số điện thoại",
+            DOB: "Chưa cập nhật",
+            gmail: "Chưa liên kết",
           };
         }
       })
@@ -54,6 +60,8 @@ export const fetchUserByID = async (userID: string): Promise<Contact | null> => 
       username: response.data.username || "Không xác định",
       avatar: response.data.avatar,
       phoneNumber: response.data.phoneNumber || "Không có số điện thoại",
+      DOB: response.data.DOB || "Chưa cập nhật", // Thêm DOB
+      gmail: response.data.gmail || "Chưa liên kết", // Thêm gmail
     };
   } catch (error) {
     console.error("Lỗi khi lấy thông tin user:", error);
