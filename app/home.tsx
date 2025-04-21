@@ -8,9 +8,6 @@ import {
   Text,
   ActivityIndicator,
   RefreshControl,
-  Modal,
-  TextInput,
-  Button,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import Navbar from "../components/Navbar";
@@ -19,7 +16,7 @@ import { fetchMessages, Message } from "../services/message";
 import { fetchContacts, Contact } from "../services/contacts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import socket, { connectSocket, registerSocketListeners, removeSocketListeners } from "../services/socket";
-import { fetchUserGroups, Group, createGroup } from "../services/group";
+import { fetchUserGroups, Group } from "../services/group";
 
 type HomeMessage = {
   senderID: string;
@@ -49,9 +46,6 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentUserID, setCurrentUserID] = useState<string | null>(null);
-  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
-  const [groupName, setGroupName] = useState("");
-  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const router = useRouter();
   const processedMessageIDs = useRef(new Set<string>());
   const joinedContactRooms = useRef(new Set<string>());
@@ -521,6 +515,15 @@ export default function Home() {
           console.log("Home.tsx: Socket disconnected:", reason);
         },
       },
+      {
+        event: "newMember",
+        handler: (userID: string) => {
+          console.log("Home.tsx: Thành viên mới được thêm:", userID);
+          if (currentUserID) {
+            loadMessages(currentUserID);
+          }
+        },
+      },
     ];
 
     registerSocketListeners(listeners);
@@ -549,45 +552,6 @@ export default function Home() {
       });
     }
   }, [currentUserID, contacts, groups]);
-
-  const toggleMember = (userID: string) => {
-    setSelectedMembers((prev) =>
-      prev.includes(userID) ? prev.filter((id) => id !== userID) : [...prev, userID]
-    );
-  };
-
-  const handleCreateGroup = async () => {
-    if (!groupName.trim()) {
-      alert("Vui lòng nhập tên nhóm!");
-      return;
-    }
-    try {
-      const newGroup = await createGroup({ groupName, userID: currentUserID! });
-      setGroups((prev) => [...prev, newGroup]);
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          type: "group" as const,
-          data: {
-            groupID: newGroup.groupID,
-            groupName: newGroup.groupName,
-            context: "Nhóm mới được tạo",
-            createdAt: new Date().toISOString(),
-            unreadCount: 0,
-          },
-        },
-      ].sort((a, b) => new Date(b.data.createdAt).getTime() - new Date(a.data.createdAt).getTime()));
-
-      setShowCreateGroupModal(false);
-      setGroupName("");
-      setSelectedMembers([]);
-      alert("Tạo nhóm thành công!");
-    } catch (error) {
-      console.error("Lỗi tạo nhóm:", error);
-      alert("Không thể tạo nhóm!");
-    }
-  };
 
   useEffect(() => {
     isMounted.current = true;
@@ -633,6 +597,7 @@ export default function Home() {
         "recalledGroupMessage",
         "connect",
         "disconnect",
+        "newMember",
       ]);
     };
   }, [loadMessages]);
@@ -645,7 +610,6 @@ export default function Home() {
         console.log("Home.tsx: Cleared processedMessageIDs");
         loadMessages(currentUserID);
 
-        // Remove previous listeners and set up new ones
         removeSocketListeners([
           "receiveMessage",
           "updateSingleChatSeenStatus",
@@ -656,6 +620,7 @@ export default function Home() {
           "recalledGroupMessage",
           "connect",
           "disconnect",
+          "newMember",
         ]);
         setupSocketListeners();
       }
@@ -753,29 +718,6 @@ export default function Home() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         extraData={messages}
       />
-      
-      <Modal
-        visible={showCreateGroupModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowCreateGroupModal(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Tạo nhóm mới</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Nhập tên nhóm"
-              value={groupName}
-              onChangeText={setGroupName}
-            />
-            <View style={styles.modalButtons}>
-              <Button title="Hủy" onPress={() => setShowCreateGroupModal(false)} />
-              <Button title="Tạo" onPress={handleCreateGroup} />
-            </View>
-          </View>
-        </View>
-      </Modal>
       <Footer />
     </View>
   );
@@ -844,47 +786,5 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-  },
-  createGroupButton: {
-    backgroundColor: "#007AFF",
-    padding: 10,
-    borderRadius: 25,
-    position: "absolute",
-    bottom: 80,
-    right: 20,
-    zIndex: 1000,
-  },
-  createGroupText: {
-    color: "#fff",
-    fontWeight: "bold",
-  },
-  modalContainer: {
-    flex: 1,
-    justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.5)",
-  },
-  modalContent: {
-    backgroundColor: "#fff",
-    marginHorizontal: 20,
-    padding: 20,
-    borderRadius: 10,
-    maxHeight: "80%",
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    marginBottom: 10,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#ddd",
-    padding: 10,
-    borderRadius: 5,
-    marginBottom: 10,
-  },
-  modalButtons: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 10,
   },
 });

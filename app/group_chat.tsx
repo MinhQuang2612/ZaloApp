@@ -17,8 +17,9 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { sendMessage, fetchGroupMessages, Message } from "../services/message";
-import { fetchUserGroups } from "../services/group"; // Thêm import
+import { sendMessage, fetchMessages, Message } from "../services/message";
+import { fetchUserGroups } from "../services/group";
+import { addGroupMember, deleteGroup } from "../services/socket";
 import socket from "../services/socket";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
@@ -163,7 +164,10 @@ export default function GroupChat() {
   const [currentUserID, setCurrentUserID] = useState<string | null>(null);
   const [groupName, setGroupName] = useState<string>("Nhóm không tên");
   const [loading, setLoading] = useState(true);
+  const [loadingGroupName, setLoadingGroupName] = useState(true);
   const [markedAsSeen, setMarkedAsSeen] = useState<Set<string>>(new Set());
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [newMemberID, setNewMemberID] = useState("");
   const flatListRef = useRef<FlatList>(null);
 
   const [showStickerPicker, setShowStickerPicker] = useState(false);
@@ -181,6 +185,88 @@ export default function GroupChat() {
     } catch (error) {
       console.error("Lỗi khi lấy sticker từ Giphy:", error);
     }
+  };
+
+  const fetchGroupName = async (userID: string, groupID: string) => {
+    setLoadingGroupName(true);
+    try {
+      const userGroups = await fetchUserGroups(userID);
+      const group = userGroups.find((g) => g.groupID === groupID);
+      if (group) {
+        setGroupName(group.groupName);
+      } else {
+        console.warn("Không tìm thấy nhóm với groupID:", groupID);
+        setGroupName("Nhóm không tên");
+      }
+    } catch (error) {
+      console.error("Lỗi khi lấy tên nhóm:", error);
+      setGroupName("Nhóm không tên");
+      Alert.alert(
+        "Lỗi",
+        "Không thể tải tên nhóm. Vui lòng thử lại.",
+        [
+          { text: "Hủy", style: "cancel" },
+          { text: "Thử lại", onPress: () => fetchGroupName(userID, groupID) },
+        ]
+      );
+    } finally {
+      setLoadingGroupName(false);
+    }
+  };
+
+  const handleAddMember = async () => {
+    if (!newMemberID.trim() || !groupID) {
+      Alert.alert("Lỗi", "Vui lòng nhập userID của thành viên.");
+      return;
+    }
+
+    try {
+      const userCheckResponse = await fetch(`http://3.95.192.17:3000/api/user/${newMemberID}`);
+      const userCheckData = await userCheckResponse.json();
+      if (!userCheckData) {
+        Alert.alert("Lỗi", "User không tồn tại.");
+        return;
+      }
+
+      const response = await addGroupMember(newMemberID, groupID as string);
+      Alert.alert("Thành công", response);
+      setNewMemberID("");
+      setShowAddMemberModal(false);
+    } catch (error: any) {
+      console.error("Lỗi khi thêm thành viên:", error.message);
+      Alert.alert("Lỗi", `Không thể thêm thành viên: ${error.message}`);
+    }
+  };
+
+  const handleDeleteGroup = async () => {
+    if (!groupID || !currentUserID) {
+      Alert.alert("Lỗi", "Không tìm thấy thông tin nhóm hoặc người dùng.");
+      return;
+    }
+
+    Alert.alert(
+      "Xác nhận",
+      "Bạn có chắc chắn muốn xóa nhóm này không? Hành động này không thể hoàn tác.",
+      [
+        { text: "Hủy", style: "cancel" },
+        {
+          text: "Xóa",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const response = await deleteGroup(currentUserID, groupID as string);
+              Alert.alert("Thành công", response);
+              router.replace("/home");
+            } catch (error: any) {
+              console.error("Lỗi khi xóa nhóm:", error.message);
+              if (error.message !== "Xóa nhóm thành công") {
+                Alert.alert("Lỗi", `Không thể xóa nhóm: ${error.message}`);
+              }
+            }
+          },
+        },
+      ]
+    );
   };
 
   useEffect(() => {
@@ -217,23 +303,10 @@ export default function GroupChat() {
         return;
       }
 
-      // Lấy danh sách nhóm để tìm tên nhóm
-      try {
-        const userGroups = await fetchUserGroups(userIDValue);
-        const group = userGroups.find((g) => g.groupID === groupID);
-        if (group) {
-          setGroupName(group.groupName);
-        } else {
-          console.warn("Không tìm thấy nhóm với groupID:", groupID);
-        }
-      } catch (error) {
-        console.error("Lỗi khi lấy danh sách nhóm:", error);
-        Alert.alert("Lỗi", "Không thể tải thông tin nhóm. Vui lòng thử lại.");
-      }
+      await fetchGroupName(userIDValue, groupID as string);
 
-      // Lấy tin nhắn nhóm từ API
       try {
-        const groupMessages = await fetchGroupMessages(groupID as string);
+        const groupMessages = await fetchMessages(groupID as string, true);
         setMessages(groupMessages);
       } catch (error) {
         console.error("Lỗi khi lấy tin nhắn nhóm:", error);
@@ -268,20 +341,36 @@ export default function GroupChat() {
         );
       });
 
+      socket.on("newMember", (userID: string) => {
+        console.log("Thành viên mới tham gia nhóm:", userID);
+        Alert.alert("Thông báo", `Thành viên mới ${userID} đã tham gia nhóm.`);
+      });
+
+      socket.on("groupDeleted", (deletedGroupID: string) => {
+        console.log("Nhóm đã bị xóa:", deletedGroupID);
+        if (deletedGroupID === groupID) {
+          socket.emit("leaveGroupRoom", groupID);
+          Alert.alert("Thông báo", "Nhóm đã bị xóa.");
+          router.replace("/home");
+        }
+      });
+
       socket.on("disconnect", (reason) => {
         console.log("GroupChat.tsx: Socket disconnected:", reason);
       });
 
       setLoading(false);
-
-      return () => {
-        socket.off("receiveGroupMessage");
-        socket.off("updateGroupChatSeenStatus");
-        socket.off("disconnect");
-      };
     };
 
     initializeSocketAndData();
+
+    return () => {
+      socket.off("receiveGroupMessage");
+      socket.off("updateGroupChatSeenStatus");
+      socket.off("newMember");
+      socket.off("groupDeleted");
+      socket.off("disconnect");
+    };
   }, [groupID]);
 
   useEffect(() => {
@@ -554,7 +643,19 @@ export default function GroupChat() {
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.username}>{groupName}</Text>
+        <View style={styles.groupNameContainer}>
+          {loadingGroupName ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={styles.username}>{groupName}</Text>
+          )}
+        </View>
+        <TouchableOpacity onPress={() => setShowAddMemberModal(true)}>
+          <Ionicons name="person-add-outline" size={24} color="#fff" style={{ marginRight: 18 }} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={handleDeleteGroup}>
+          <Ionicons name="trash-outline" size={24} color="#fff" style={{ marginRight: 18 }} />
+        </TouchableOpacity>
         <TouchableOpacity>
           <Ionicons name="call-outline" size={24} color="#fff" style={{ marginRight: 18 }} />
         </TouchableOpacity>
@@ -596,6 +697,36 @@ export default function GroupChat() {
           <Ionicons name="send" size={24} color="#007AFF" />
         </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={showAddMemberModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowAddMemberModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.addMemberModal}>
+            <Text style={styles.modalTitle}>Thêm thành viên mới</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Nhập userID của thành viên"
+              value={newMemberID}
+              onChangeText={setNewMemberID}
+            />
+            <View style={styles.modalButtonContainer}>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => setShowAddMemberModal(false)}
+              >
+                <Text style={styles.modalButtonText}>Hủy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalButton} onPress={handleAddMember}>
+                <Text style={styles.modalButtonText}>Thêm</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showStickerPicker}
@@ -644,7 +775,12 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     paddingHorizontal: 15,
   },
-  username: { flex: 1, color: "#fff", fontSize: 18, fontWeight: "bold", marginLeft: 10 },
+  groupNameContainer: {
+    flex: 1,
+    marginLeft: 10,
+    justifyContent: "center",
+  },
+  username: { color: "#fff", fontSize: 18, fontWeight: "bold" },
   messageContainer: { flexDirection: "row", alignItems: "center", marginVertical: 5, paddingHorizontal: 10 },
   myMessage: { justifyContent: "flex-end", alignSelf: "flex-end" },
   otherMessage: { justifyContent: "flex-start", alignSelf: "flex-start" },
@@ -670,8 +806,31 @@ const styles = StyleSheet.create({
   },
   input: { flex: 1, fontSize: 16, marginHorizontal: 10 },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-  modalContainer: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.5)" },
-  stickerPicker: { backgroundColor: "#fff", height: "50%", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
+  modalContainer: { flex: 1, justifyContent: "center", backgroundColor: "rgba(0,0,0,0.5)" },
+  addMemberModal: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    padding: 20,
+    marginHorizontal: 20,
+  },
+  modalTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 15, textAlign: "center" },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 15,
+  },
+  modalButtonContainer: { flexDirection: "row", justifyContent: "space-around" },
+  modalButton: { backgroundColor: "#007AFF", padding: 10, borderRadius: 10, width: 100, alignItems: "center" },
+  modalButtonText: { color: "#fff", fontSize: 16 },
+  stickerPicker: {
+    backgroundColor: "#fff",
+    height: "50%",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+  },
   stickerSearchInput: { borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 10, marginBottom: 10 },
   stickerThumbnail: { width: 80, height: 80, margin: 5 },
   closeButton: { backgroundColor: "#007AFF", padding: 10, borderRadius: 10, alignItems: "center", marginTop: 10 },

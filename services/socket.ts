@@ -1,14 +1,13 @@
 import { io, Socket } from "socket.io-client";
 import { getAccessToken, refreshAccessToken } from "../services/auth";
 
-// Cập nhật URL để dùng HTTPS nếu EC2 đã có SSL, hoặc dùng HTTP để kiểm tra
-const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://3.95.192.17:3000"; // Thay đổi nếu đã có HTTPS
+const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://3.95.192.17:3000";
 console.log("Socket API URL:", API_URL);
 
 const socket: Socket = io(API_URL, {
   reconnection: true,
-  reconnectionAttempts: Infinity, // Thử kết nối lại vô số lần
-  reconnectionDelay: 1000, // Delay giữa các lần thử (1 giây)
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 1000,
   timeout: 30000,
   autoConnect: false,
   transports: ["websocket"],
@@ -51,6 +50,54 @@ export const connectSocket = async (): Promise<void> => {
 export const joinGroupRoom = (groupID: string) => {
   socket.emit("joinGroupRoom", groupID);
   console.log("Joined group room:", groupID);
+};
+
+export const joinGroup = (userID: string, groupID: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    socket.emit("joinGroup", userID, groupID, (response: string) => {
+      console.log("Join group response:", response);
+      if (response === "Tham gia nhóm thành công" || response === "user đã là thành viên của nhóm này") {
+        resolve(response);
+      } else {
+        reject(new Error(response));
+      }
+    });
+  });
+};
+
+export const addGroupMember = (userID: string, groupID: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    socket.emit("addGroupMember", userID, groupID, (response: string) => {
+      console.log("Add group member response:", response);
+      if (response === "Thêm thành viên thành công") {
+        resolve(response);
+      } else {
+        reject(new Error(response));
+      }
+    });
+  });
+};
+
+export const deleteGroup = (userID: string, groupID: string): Promise<string> => {
+  return new Promise(async (resolve, reject) => {
+      if (!socket.connected) {
+          console.log("Socket chưa kết nối, đang thử kết nối lại...");
+          try {
+              await connectSocket();
+          } catch (error) {
+              reject(new Error("Không thể kết nối socket"));
+              return;
+          }
+      }
+      socket.emit("deleteGroup", userID, groupID, (response: string) => {
+          console.log("Delete group response:", response);
+          if (response === "Xóa nhóm thành công") {
+              resolve(response);
+          } else {
+              reject(new Error(response));
+          }
+      });
+  });
 };
 
 export const disconnectSocket = () => {
