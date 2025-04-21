@@ -107,7 +107,7 @@ export const deleteMessage = (messageID: string, userID: string): Promise<boolea
 
 export const recallMessage = (messageID: string, userID: string): Promise<boolean> => {
   return new Promise((resolve, reject) => {
-    socket.emit("recallMessage", { messageID, userID }, (response: string) => {
+    socket.emit("recallMessage", messageID, userID, (response: string) => {
       console.log("Recall message response:", response);
       if (response === "Thu hồi tin nhắn thành công") {
         resolve(true);

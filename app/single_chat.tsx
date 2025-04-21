@@ -405,6 +405,21 @@ export default function Chat() {
     }
   };
 
+  // Thêm hàm removeMessageStatus để xóa trạng thái tin nhắn khỏi AsyncStorage
+  const removeMessageStatus = async (messageID: string) => {
+    try {
+      const existingStatuses = await AsyncStorage.getItem("messageStatuses");
+      if (existingStatuses) {
+        const statuses = JSON.parse(existingStatuses);
+        delete statuses[messageID];
+        await AsyncStorage.setItem("messageStatuses", JSON.stringify(statuses));
+        console.log(`Chat.tsx: Removed message status for messageID: ${messageID}`);
+      }
+    } catch (error) {
+      console.error("Lỗi khi xóa trạng thái tin nhắn:", error);
+    }
+  };
+
   useEffect(() => {
     return () => {
       const cleanupRecording = async () => {
@@ -555,12 +570,10 @@ export default function Chat() {
         event: "recalledSingleMessage",
         handler: (messageID: string) => {
           console.log("Chat.tsx: Received recalledSingleMessage for messageID:", messageID);
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.messageID === messageID ? { ...msg, recallStatus: true } : msg
-            )
-          );
-          saveMessageStatus(messageID, "recalled");
+          // Xóa tin nhắn khỏi danh sách messages
+          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+          // Xóa trạng thái tin nhắn khỏi AsyncStorage
+          removeMessageStatus(messageID);
         },
       },
       {
@@ -617,29 +630,32 @@ export default function Chat() {
 
       // Fetch messages from API
       const data = await fetchMessages(targetUserID);
-      const updatedData = data.map((message) => {
-        if (
-          message.messageTypeID === "type2" ||
-          message.messageTypeID === "type3" ||
-          message.messageTypeID === "type5" ||
-          message.messageTypeID === "type6"
-        ) {
-          message.context = convertFilePathToURL(message.context);
-        }
-        message.deleteStatusByUser = message.deleteStatusByUser || [];
-        message.recallStatus = message.recallStatus || false;
+      const updatedData = data
+        .map((message) => {
+          if (
+            message.messageTypeID === "type2" ||
+            message.messageTypeID === "type3" ||
+            message.messageTypeID === "type5" ||
+            message.messageTypeID === "type6"
+          ) {
+            message.context = convertFilePathToURL(message.context);
+          }
+          message.deleteStatusByUser = message.deleteStatusByUser || [];
+          message.recallStatus = message.recallStatus || false;
 
-        // Apply status from AsyncStorage if exists
-        if (statuses[message.messageID!]) {
+          // Loại bỏ tin nhắn đã bị thu hồi
+          if (statuses[message.messageID!] === "recalled") {
+            return null;
+          }
+
+          // Apply status from AsyncStorage if exists
           if (statuses[message.messageID!] === "deleted") {
             message.deleteStatusByUser = [...(message.deleteStatusByUser || []), currentUserID!];
-          } else if (statuses[message.messageID!] === "recalled") {
-            message.recallStatus = true;
           }
-        }
 
-        return message;
-      });
+          return message;
+        })
+        .filter((message): message is Message => message !== null); // Loại bỏ các message null
 
       // Update cache and state
       setMessages(updatedData);
@@ -651,7 +667,10 @@ export default function Chat() {
       const cacheKey = `messages_${targetUserID}`;
       const cachedMessages = await AsyncStorage.getItem(cacheKey);
       if (cachedMessages) {
-        setMessages(JSON.parse(cachedMessages));
+        const parsedMessages = JSON.parse(cachedMessages).filter(
+          (msg: Message) => !msg.recallStatus
+        );
+        setMessages(parsedMessages);
         console.log("Chat.tsx: Loaded messages from cache");
       }
     }
@@ -799,19 +818,19 @@ export default function Chat() {
     try {
       if (!currentUserID) return;
       console.log("Chat.tsx: Attempting to recall messageID:", messageID);
-      setMessages((prev) =>
-        prev.map((msg) => (msg.messageID === messageID ? { ...msg, recallStatus: true } : msg))
-      );
-      await saveMessageStatus(messageID, "recalled");
+      // Xóa tin nhắn khỏi danh sách messages ngay lập tức
+      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+      // Xóa trạng thái tin nhắn khỏi AsyncStorage
+      await removeMessageStatus(messageID);
+      // Gửi yêu cầu thu hồi đến server
       await recallMessage(messageID, currentUserID);
       console.log("Chat.tsx: Recalled messageID:", messageID);
       Alert.alert("Thành công", "Đã thu hồi tin nhắn");
     } catch (error) {
       console.error("Lỗi khi thu hồi tin nhắn:", error);
-      setMessages((prev) =>
-        prev.map((msg) => (msg.messageID === messageID ? { ...msg, recallStatus: false } : msg))
-      );
+      // Hoàn tác nếu có lỗi: tải lại danh sách tin nhắn từ cache hoặc server
       Alert.alert("Lỗi", "Không thể thu hồi tin nhắn. Vui lòng thử lại.");
+      await loadMessagesWithCache(userID!);
     }
   };
 
