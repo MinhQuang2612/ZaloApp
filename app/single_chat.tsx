@@ -13,6 +13,9 @@ import {
   Image,
   Platform,
   Linking,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
+  LayoutChangeEvent,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -379,6 +382,12 @@ export default function Chat() {
   const [stickerSearchTerm, setStickerSearchTerm] = useState("funny");
   const insets = useSafeAreaInsets();
   const GIPHY_API_KEY = "ahUloRbYoMUhR2aBUDO2iyNObLH8dnMa";
+  const [contentHeight, setContentHeight] = useState(0);
+  const [layoutHeight, setLayoutHeight] = useState(0);
+  const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [isAtBottom, setIsAtBottom] = useState(true);
 
   // Load pinned message from AsyncStorage
   const loadPinnedMessage = async (chatID: string) => {
@@ -969,7 +978,7 @@ export default function Chat() {
       senderID: currentUserID,
       receiverID: userID,
       messageTypeID: "type2",
-      context: "Đang tải...",
+      context: fileUri, // Hiển thị ngay ảnh cho người gửi
       messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
@@ -978,6 +987,7 @@ export default function Chat() {
     };
 
     setMessages((prev) => [...prev, tempMessage]);
+    scrollToBottom();
 
     try {
       const fileBase64 = await convertFileToBase64(fileUri);
@@ -1039,7 +1049,7 @@ export default function Chat() {
       senderID: currentUserID,
       receiverID: userID,
       messageTypeID: "type3",
-      context: "Đang tải...",
+      context: fileUri, // Hiển thị ngay video cho người gửi
       messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
@@ -1048,6 +1058,7 @@ export default function Chat() {
     };
 
     setMessages((prev) => [...prev, tempMessage]);
+    scrollToBottom();
 
     try {
       const fileBase64 = await convertFileToBase64(fileUri);
@@ -1092,7 +1103,7 @@ export default function Chat() {
       senderID: currentUserID,
       receiverID: userID,
       messageTypeID: "type5",
-      context: "Đang tải...",
+      context: fileUri, // Hiển thị ngay file cho người gửi
       messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
@@ -1101,6 +1112,7 @@ export default function Chat() {
     };
 
     setMessages((prev) => [...prev, tempMessage]);
+    scrollToBottom();
 
     try {
       const fileBase64 = await convertFileToBase64(fileUri);
@@ -1205,7 +1217,7 @@ export default function Chat() {
         senderID: currentUserID,
         receiverID: userID,
         messageTypeID: "type6",
-        context: "Đang tải...",
+        context: uri, // Hiển thị ngay audio cho người gửi
         messageID,
         createdAt: new Date().toISOString(),
         seenStatus: [],
@@ -1214,6 +1226,7 @@ export default function Chat() {
       };
 
       setMessages((prev) => [...prev, tempMessage]);
+      scrollToBottom();
 
       const fileBase64 = await convertFileToBase64(uri);
       const newMessage: Message = {
@@ -1248,11 +1261,29 @@ export default function Chat() {
     }
   };
 
-  useEffect(() => {
-    if (flatListRef.current && messages.length > 0) {
-      flatListRef.current.scrollToEnd({ animated: true });
+  const scrollToBottom = useCallback((animated = true) => {
+    if (flatListRef.current) {
+      flatListRef.current.scrollToEnd({ animated });
     }
-  }, [messages]);
+  }, []);
+
+  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const paddingToBottom = 20;
+    const currentIsAtBottom = contentSize.height - contentOffset.y - layoutMeasurement.height < paddingToBottom;
+    setIsAtBottom(currentIsAtBottom);
+    setShowScrollButton(!currentIsAtBottom);
+  }, []);
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      if (isAtBottom) {
+        scrollToBottom(true);
+      } else {
+        setShowScrollButton(true);
+      }
+    }
+  }, [messages.length, isAtBottom, scrollToBottom]);
 
   const renderItem = useCallback(
     ({ item }: { item: Message }) => (
@@ -1269,11 +1300,11 @@ export default function Chat() {
     [currentUserID, userID]
   );
 
-  const getItemLayout = (data: ArrayLike<Message> | null | undefined, index: number) => ({
-    length: 100,
-    offset: 100 * index,
-    index,
-  });
+  const getItemLayout = (data: ArrayLike<Message> | null | undefined, index: number) => {
+    const length = 100;
+    const offset = length * index;
+    return { length, offset, index };
+  };
 
   const renderPinnedMessage = () => {
     if (!pinnedMessageID) return null;
@@ -1313,41 +1344,68 @@ export default function Chat() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.navbar, { paddingTop: insets.top, paddingBottom: 8, zIndex: 1000 }]}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
-        <TouchableOpacity
-        onPress={() => router.push({ pathname: "/user_profile", params: { userID } })}
-      >
-        <Text style={styles.username}>{receiverName}</Text>
-      </TouchableOpacity>
-        <TouchableOpacity>
-          <Ionicons name="call-outline" size={24} color="#fff" style={{ marginLeft: 150 }} />
-        </TouchableOpacity>
-        <TouchableOpacity>
-          <Ionicons name="videocam-outline" size={27} color="#fff" style={{ marginLeft: 20 }}/>
-        </TouchableOpacity>
-        <TouchableOpacity>
-          <Ionicons name="menu" size={27} color="#fff" style={{ marginLeft: 20 }}/>
-        </TouchableOpacity>
+      <View style={[styles.navbar, { paddingTop: insets.top }]}>
+        <View style={styles.navbarContent}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.userInfo}
+            onPress={() => router.push({ pathname: "/user_profile", params: { userID } })}
+          >
+            <Text style={styles.username} numberOfLines={1}>{receiverName}</Text>
+          </TouchableOpacity>
+
+          <View style={styles.navbarActions}>
+            <TouchableOpacity style={styles.actionButton}>
+              <Ionicons name="call-outline" size={24} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionButton}>
+              <Ionicons name="videocam-outline" size={24} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionButton}>
+              <Ionicons name="menu" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
 
       {renderPinnedMessage()}
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={(item, index) => item.messageID || item.createdAt || `message-${index}`}
-        renderItem={renderItem}
-        contentContainerStyle={{
-          padding: 10,
-          paddingTop: pinnedMessageID ? 110 + insets.top : 10 + insets.top,
-        }}
-        initialNumToRender={10}
-        windowSize={5}
-        extraData={messages}
-        getItemLayout={getItemLayout}
-      />
+      <View style={styles.chatContainer}>
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={(item, index) => item.messageID || item.createdAt || `message-${index}`}
+          renderItem={renderItem}
+          contentContainerStyle={{
+            padding: 10,
+            paddingTop: pinnedMessageID ? 110 + insets.top : 10 + insets.top,
+            paddingBottom: 20,
+          }}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+          initialNumToRender={15}
+          windowSize={5}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          updateCellsBatchingPeriod={50}
+        />
+
+        {showScrollButton && (
+          <TouchableOpacity
+            style={styles.scrollButton}
+            onPress={() => {
+              scrollToBottom(true);
+              setShowScrollButton(false);
+            }}
+          >
+            <View style={styles.scrollButtonInner}>
+              <Ionicons name="arrow-down" size={24} color="#fff" />
+            </View>
+          </TouchableOpacity>
+        )}
+      </View>
 
       <View style={[styles.inputContainer, { paddingBottom: insets.bottom }]}>
         <TouchableOpacity onPress={() => setShowStickerPicker(true)}>
@@ -1491,13 +1549,53 @@ export default function Chat() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F5F5F5" },
   navbar: {
-    flexDirection: "row",
-    alignItems: "center",
     backgroundColor: "#007AFF",
-    paddingVertical: 15,
-    paddingHorizontal: 15,
+    width: '100%',
+    zIndex: 1000,
+    ...Platform.select({
+      android: {
+        elevation: 4,
+      },
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+      },
+    }),
   },
-  username: { flex: 1, color: "#fff", fontSize: 18, fontWeight: "bold", marginLeft: 10 },
+  navbarContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    height: 56,
+    width: '100%',
+  },
+  backButton: {
+    padding: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  userInfo: {
+    flex: 1,
+    marginLeft: 8,
+    justifyContent: 'center',
+  },
+  username: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  navbarActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  actionButton: {
+    padding: 8,
+    marginLeft: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   messageContainer: { flexDirection: "row", alignItems: "flex-end", marginVertical: 5, paddingHorizontal: 10 },
   myMessage: { justifyContent: "flex-end" },
   otherMessage: { justifyContent: "flex-start" },
@@ -1613,4 +1711,30 @@ const styles = StyleSheet.create({
   pinnedMessageText: { fontSize: 14, color: "#000", marginVertical: 5 },
   unpinButton: { flexDirection: "row", alignItems: "center" },
   unpinButtonText: { fontSize: 12, color: "#007AFF", marginLeft: 5 },
+  chatContainer: {
+    flex: 1,
+    position: 'relative',
+  },
+  scrollButton: {
+    position: 'absolute',
+    right: 16,
+    bottom: 16,
+    zIndex: 1000,
+  },
+  scrollButtonInner: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
 });
