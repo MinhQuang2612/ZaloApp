@@ -100,6 +100,32 @@ export const deleteGroup = (userID: string, groupID: string): Promise<string> =>
   });
 };
 
+// Hàm kick thành viên
+export const kickMember = (userID: string, groupID: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    socket.emit("kickMember", { userID, groupID }, (response: string) => {
+      if (response.includes("Thành công")) {
+        resolve(response);
+      } else {
+        reject(new Error(response));
+      }
+    });
+  });
+};
+
+// Hàm rời nhóm
+export const leaveGroup = (userID: string, groupID: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    socket.emit("leaveGroup", { userID, groupID }, (response: string) => {
+      if (response.includes("Thành công")) {
+        resolve(response);
+      } else {
+        reject(new Error(response));
+      }
+    });
+  });
+};
+
 export const disconnectSocket = () => {
   if (socket.connected) {
     console.log("Disconnecting socket...");

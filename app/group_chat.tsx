@@ -18,8 +18,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { sendMessage, fetchMessages, Message } from "../services/message";
-import { fetchUserGroups } from "../services/group";
-import { addGroupMember, deleteGroup } from "../services/socket";
+import { fetchUserGroups, fetchGroupMembers, GroupMember } from "../services/group";
 import socket from "../services/socket";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
@@ -47,6 +46,12 @@ type GiphySticker = {
 };
 
 type GroupMessage = Message;
+
+type User = {
+  userID: string;
+  username: string;
+  avatar: string;
+};
 
 const MessageItem = ({
   item,
@@ -163,16 +168,15 @@ export default function GroupChat() {
   const [inputText, setInputText] = useState("");
   const [currentUserID, setCurrentUserID] = useState<string | null>(null);
   const [groupName, setGroupName] = useState<string>("Nhóm không tên");
+  const [membersCount, setMembersCount] = useState<number>(0);
+  const [memberAvatars, setMemberAvatars] = useState<string[]>([]); // Lưu danh sách avatar của tối đa 4 thành viên
   const [loading, setLoading] = useState(true);
   const [loadingGroupName, setLoadingGroupName] = useState(true);
   const [markedAsSeen, setMarkedAsSeen] = useState<Set<string>>(new Set());
-  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
-  const [newMemberID, setNewMemberID] = useState("");
-  const flatListRef = useRef<FlatList>(null);
-
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [stickers, setStickers] = useState<GiphySticker[]>([]);
   const [stickerSearchTerm, setStickerSearchTerm] = useState("funny");
+  const flatListRef = useRef<FlatList>(null);
   const insets = useSafeAreaInsets();
   const GIPHY_API_KEY = "ahUloRbYoMUhR2aBUDO2iyNObLH8dnMa";
 
@@ -187,7 +191,18 @@ export default function GroupChat() {
     }
   };
 
-  const fetchGroupName = async (userID: string, groupID: string) => {
+  const fetchUserAvatar = async (userID: string): Promise<string> => {
+    try {
+      const response = await fetch(`http://3.95.192.17:3000/api/user/${userID}`);
+      const userData = await response.json();
+      return userData.avatar || "https://randomuser.me/api/portraits/men/1.jpg"; // Ảnh mặc định nếu không có avatar
+    } catch (error) {
+      console.error(`Lỗi khi lấy avatar của user ${userID}:`, error);
+      return "https://randomuser.me/api/portraits/men/1.jpg"; // Ảnh mặc định nếu lỗi
+    }
+  };
+
+  const fetchGroupDetails = async (userID: string, groupID: string) => {
     setLoadingGroupName(true);
     try {
       const userGroups = await fetchUserGroups(userID);
@@ -198,75 +213,33 @@ export default function GroupChat() {
         console.warn("Không tìm thấy nhóm với groupID:", groupID);
         setGroupName("Nhóm không tên");
       }
+
+      // Lấy danh sách thành viên từ API
+      const groupMembers = await fetchGroupMembers(groupID);
+      setMembersCount(groupMembers.length || 0);
+
+      // Lấy avatar của tối đa 4 thành viên đầu tiên
+      const avatars: string[] = [];
+      for (let i = 0; i < Math.min(4, groupMembers.length); i++) {
+        const member = groupMembers[i];
+        const avatar = await fetchUserAvatar(member.userID);
+        avatars.push(avatar);
+      }
+      setMemberAvatars(avatars);
     } catch (error) {
-      console.error("Lỗi khi lấy tên nhóm:", error);
+      console.error("Lỗi khi lấy chi tiết nhóm:", error);
       setGroupName("Nhóm không tên");
       Alert.alert(
         "Lỗi",
-        "Không thể tải tên nhóm. Vui lòng thử lại.",
+        "Không thể tải chi tiết nhóm. Vui lòng thử lại.",
         [
           { text: "Hủy", style: "cancel" },
-          { text: "Thử lại", onPress: () => fetchGroupName(userID, groupID) },
+          { text: "Thử lại", onPress: () => fetchGroupDetails(userID, groupID) },
         ]
       );
     } finally {
       setLoadingGroupName(false);
     }
-  };
-
-  const handleAddMember = async () => {
-    if (!newMemberID.trim() || !groupID) {
-      Alert.alert("Lỗi", "Vui lòng nhập userID của thành viên.");
-      return;
-    }
-
-    try {
-      const userCheckResponse = await fetch(`http://3.95.192.17:3000/api/user/${newMemberID}`);
-      const userCheckData = await userCheckResponse.json();
-      if (!userCheckData) {
-        Alert.alert("Lỗi", "User không tồn tại.");
-        return;
-      }
-
-      const response = await addGroupMember(newMemberID, groupID as string);
-      Alert.alert("Thành công", response);
-      setNewMemberID("");
-      setShowAddMemberModal(false);
-    } catch (error: any) {
-      console.error("Lỗi khi thêm thành viên:", error.message);
-      Alert.alert("Lỗi", `Không thể thêm thành viên: ${error.message}`);
-    }
-  };
-
-  const handleDeleteGroup = async () => {
-    if (!groupID || !currentUserID) {
-      Alert.alert("Lỗi", "Không tìm thấy thông tin nhóm hoặc người dùng.");
-      return;
-    }
-
-    Alert.alert(
-      "Xác nhận",
-      "Bạn có chắc chắn muốn xóa nhóm này không? Hành động này không thể hoàn tác.",
-      [
-        { text: "Hủy", style: "cancel" },
-        {
-          text: "Xóa",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const response = await deleteGroup(currentUserID, groupID as string);
-              Alert.alert("Thành công", response);
-              router.replace("/home");
-            } catch (error: any) {
-              console.error("Lỗi khi xóa nhóm:", error.message);
-              if (error.message !== "Xóa nhóm thành công") {
-                Alert.alert("Lỗi", `Không thể xóa nhóm: ${error.message}`);
-              }
-            }
-          },
-        },
-      ]
-    );
   };
 
   useEffect(() => {
@@ -303,7 +276,7 @@ export default function GroupChat() {
         return;
       }
 
-      await fetchGroupName(userIDValue, groupID as string);
+      await fetchGroupDetails(userIDValue, groupID as string);
 
       try {
         const groupMessages = await fetchMessages(groupID as string, true);
@@ -344,6 +317,7 @@ export default function GroupChat() {
       socket.on("newMember", (userID: string) => {
         console.log("Thành viên mới tham gia nhóm:", userID);
         Alert.alert("Thông báo", `Thành viên mới ${userID} đã tham gia nhóm.`);
+        fetchGroupDetails(userIDValue, groupID as string);
       });
 
       socket.on("groupDeleted", (deletedGroupID: string) => {
@@ -352,6 +326,26 @@ export default function GroupChat() {
           socket.emit("leaveGroupRoom", groupID);
           Alert.alert("Thông báo", "Nhóm đã bị xóa.");
           router.replace("/home");
+        }
+      });
+
+      socket.on("memberKicked", ({ userID, groupID: kickedGroupID }: { userID: string; groupID: string }) => {
+        console.log("Thành viên bị kick:", userID, "từ nhóm:", kickedGroupID);
+        if (kickedGroupID === groupID) {
+          if (userID === currentUserID) {
+            socket.emit("leaveGroupRoom", groupID);
+            Alert.alert("Thông báo", "Bạn đã bị kick khỏi nhóm.");
+            router.replace("/home");
+          } else {
+            fetchGroupDetails(userIDValue, groupID as string);
+          }
+        }
+      });
+
+      socket.on("memberLeft", ({ userID, groupID: leftGroupID }: { userID: string; groupID: string }) => {
+        console.log("Thành viên rời nhóm:", userID, "từ nhóm:", leftGroupID);
+        if (leftGroupID === groupID && userID !== currentUserID) {
+          fetchGroupDetails(userIDValue, groupID as string);
         }
       });
 
@@ -369,6 +363,8 @@ export default function GroupChat() {
       socket.off("updateGroupChatSeenStatus");
       socket.off("newMember");
       socket.off("groupDeleted");
+      socket.off("memberKicked");
+      socket.off("memberLeft");
       socket.off("disconnect");
     };
   }, [groupID]);
@@ -639,31 +635,85 @@ export default function GroupChat() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.navbar, { paddingTop: Platform.OS === "ios" ? insets.top : 3, paddingBottom: 8 }]}>
+      {/* Navbar */}
+      <View style={[styles.navbar, { paddingTop: Platform.OS === "ios" ? insets.top : 10, paddingBottom: 10 }]}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
-        <View style={styles.groupNameContainer}>
-          {loadingGroupName ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={styles.username}>{groupName}</Text>
-          )}
-        </View>
-        <TouchableOpacity onPress={() => setShowAddMemberModal(true)}>
-          <Ionicons name="person-add-outline" size={24} color="#fff" style={{ marginRight: 18 }} />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={handleDeleteGroup}>
-          <Ionicons name="trash-outline" size={24} color="#fff" style={{ marginRight: 18 }} />
+        <TouchableOpacity
+          style={styles.groupNameContainer}
+          onPress={() => router.push({ pathname: "/group_detail", params: { groupID } })}
+        >
+          <View style={styles.groupAvatarContainer}>
+            {/* Hiển thị avatar theo dạng 2x2 */}
+            <View style={styles.avatarWrapper}>
+              {/* Hàng trên (avatar 0 và 1) */}
+              <View style={styles.avatarRow}>
+                {memberAvatars[0] && (
+                  <Image
+                    source={{ uri: memberAvatars[0] }}
+                    style={[styles.groupAvatar, { zIndex: 4 }]}
+                    onError={(e) => console.log("Error loading avatar 0:", e.nativeEvent.error)}
+                  />
+                )}
+                {memberAvatars[1] && (
+                  <Image
+                    source={{ uri: memberAvatars[1] }}
+                    style={[styles.groupAvatar, { marginLeft: -15, zIndex: 3 }]}
+                    onError={(e) => console.log("Error loading avatar 1:", e.nativeEvent.error)}
+                  />
+                )}
+              </View>
+              {/* Hàng dưới (avatar 2 và 3) */}
+              <View style={[styles.avatarRow, { marginTop: -15 }]}>
+                {memberAvatars[2] && (
+                  <Image
+                    source={{ uri: memberAvatars[2] }}
+                    style={[styles.groupAvatar, { zIndex: 2 }]}
+                    onError={(e) => console.log("Error loading avatar 2:", e.nativeEvent.error)}
+                  />
+                )}
+                {memberAvatars[3] && (
+                  <Image
+                    source={{ uri: memberAvatars[3] }}
+                    style={[styles.groupAvatar, { marginLeft: -15, zIndex: 1 }]}
+                    onError={(e) => console.log("Error loading avatar 3:", e.nativeEvent.error)}
+                  />
+                )}
+              </View>
+            </View>
+            <View style={[styles.membersCountBadge, { marginLeft: -15, zIndex: 0 }]}>
+              <Text style={styles.membersCountText}>
+                {membersCount >= 9 ? "9+" : membersCount}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.groupInfo}>
+            {loadingGroupName ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Text style={styles.groupName}>{groupName}</Text>
+                <View style={styles.groupDetails}>
+                  <Ionicons name="people-outline" size={16} color="#fff" style={styles.groupDetailIcon} />
+                  <Text style={styles.groupDetailText}>{membersCount} thành viên</Text>
+                </View>
+              </>
+            )}
+          </View>
         </TouchableOpacity>
         <TouchableOpacity>
-          <Ionicons name="call-outline" size={24} color="#fff" style={{ marginRight: 18 }} />
+          <Ionicons name="call-outline" size={24} color="#fff" style={styles.icon} />
         </TouchableOpacity>
         <TouchableOpacity>
-          <Ionicons name="videocam-outline" size={24} color="#fff" />
+          <Ionicons name="videocam-outline" size={24} color="#fff" style={styles.icon} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.push({ pathname: "/group_detail", params: { groupID } })}>
+          <Ionicons name="ellipsis-vertical" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
 
+      {/* Messages List */}
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -674,6 +724,7 @@ export default function GroupChat() {
         windowSize={5}
       />
 
+      {/* Input Area */}
       <View style={styles.inputContainer}>
         <TouchableOpacity onPress={() => setShowStickerPicker(true)}>
           <Ionicons name="happy-outline" size={24} color="#666" />
@@ -698,36 +749,7 @@ export default function GroupChat() {
         </TouchableOpacity>
       </View>
 
-      <Modal
-        visible={showAddMemberModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowAddMemberModal(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.addMemberModal}>
-            <Text style={styles.modalTitle}>Thêm thành viên mới</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Nhập userID của thành viên"
-              value={newMemberID}
-              onChangeText={setNewMemberID}
-            />
-            <View style={styles.modalButtonContainer}>
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => setShowAddMemberModal(false)}
-              >
-                <Text style={styles.modalButtonText}>Hủy</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalButton} onPress={handleAddMember}>
-                <Text style={styles.modalButtonText}>Thêm</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
+      {/* Sticker Picker Modal */}
       <Modal
         visible={showStickerPicker}
         animationType="slide"
@@ -772,29 +794,143 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#007AFF",
-    paddingVertical: 15,
     paddingHorizontal: 15,
   },
   groupNameContainer: {
     flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 10,
+  },
+  groupAvatarContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    position: "relative",
+  },
+  avatarWrapper: {
+    width: 60, // Đủ rộng để chứa 2 avatar chồng lấn
+    height: 60, // Đủ cao để chứa 2 hàng avatar
+    position: "relative",
+  },
+  avatarRow: {
+    flexDirection: "row",
+    justifyContent: "flex-start",
+  },
+  groupAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: "#fff",
+  },
+  membersCountBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#ddd",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  membersCountText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  groupInfo: {
     marginLeft: 10,
     justifyContent: "center",
   },
-  username: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-  messageContainer: { flexDirection: "row", alignItems: "center", marginVertical: 5, paddingHorizontal: 10 },
-  myMessage: { justifyContent: "flex-end", alignSelf: "flex-end" },
-  otherMessage: { justifyContent: "flex-start", alignSelf: "flex-start" },
-  avatar: { width: 40, height: 40, borderRadius: 20, marginRight: 10 },
-  messageBox: { backgroundColor: "#fff", padding: 10, borderRadius: 10 },
-  messageText: { fontSize: 16 },
-  loadingText: { fontSize: 16, color: "#666", fontStyle: "italic" },
-  seenText: { fontSize: 12, color: "#666", textAlign: "right" },
-  sticker: { width: 100, height: 100, marginVertical: 5 },
-  image: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
-  videoContainer: { width: 200, height: 200, borderRadius: 10, marginVertical: 5 },
-  video: { width: "100%", height: "100%", borderRadius: 10, resizeMode: "contain" },
-  fileContainer: { flexDirection: "row", alignItems: "center", marginVertical: 5 },
-  fileText: { fontSize: 16, color: "#007AFF", marginLeft: 10 },
+  groupName: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  groupDetails: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 2,
+  },
+  groupDetailIcon: {
+    marginRight: 5,
+  },
+  groupDetailText: {
+    color: "#fff",
+    fontSize: 14,
+  },
+  icon: {
+    marginHorizontal: 10,
+  },
+  messageContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 5,
+    paddingHorizontal: 10,
+  },
+  myMessage: {
+    justifyContent: "flex-end",
+    alignSelf: "flex-end",
+  },
+  otherMessage: {
+    justifyContent: "flex-start",
+    alignSelf: "flex-start",
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 10,
+  },
+  messageBox: {
+    backgroundColor: "#fff",
+    padding: 10,
+    borderRadius: 10,
+  },
+  messageText: {
+    fontSize: 16,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: "#666",
+    fontStyle: "italic",
+  },
+  seenText: {
+    fontSize: 12,
+    color: "#666",
+    textAlign: "right",
+  },
+  sticker: {
+    width: 100,
+    height: 100,
+    marginVertical: 5,
+  },
+  image: {
+    width: 200,
+    height: 200,
+    borderRadius: 10,
+    marginVertical: 5,
+  },
+  videoContainer: {
+    width: 200,
+    height: 200,
+    borderRadius: 10,
+    marginVertical: 5,
+  },
+  video: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 10,
+    resizeMode: "contain",
+  },
+  fileContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 5,
+  },
+  fileText: {
+    fontSize: 16,
+    color: "#007AFF",
+    marginLeft: 10,
+  },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -804,26 +940,21 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "#ddd",
   },
-  input: { flex: 1, fontSize: 16, marginHorizontal: 10 },
-  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-  modalContainer: { flex: 1, justifyContent: "center", backgroundColor: "rgba(0,0,0,0.5)" },
-  addMemberModal: {
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    padding: 20,
-    marginHorizontal: 20,
+  input: {
+    flex: 1,
+    fontSize: 16,
+    marginHorizontal: 10,
   },
-  modalTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 15, textAlign: "center" },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 15,
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  modalButtonContainer: { flexDirection: "row", justifyContent: "space-around" },
-  modalButton: { backgroundColor: "#007AFF", padding: 10, borderRadius: 10, width: 100, alignItems: "center" },
-  modalButtonText: { color: "#fff", fontSize: 16 },
+  modalContainer: {
+    flex: 1,
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
   stickerPicker: {
     backgroundColor: "#fff",
     height: "50%",
@@ -831,8 +962,28 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     padding: 20,
   },
-  stickerSearchInput: { borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 10, marginBottom: 10 },
-  stickerThumbnail: { width: 80, height: 80, margin: 5 },
-  closeButton: { backgroundColor: "#007AFF", padding: 10, borderRadius: 10, alignItems: "center", marginTop: 10 },
-  closeButtonText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
+  stickerSearchInput: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+  },
+  stickerThumbnail: {
+    width: 80,
+    height: 80,
+    margin: 5,
+  },
+  closeButton: {
+    backgroundColor: "#007AFF",
+    padding: 10,
+    borderRadius: 10,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  closeButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
 });
