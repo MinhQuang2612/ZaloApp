@@ -10,6 +10,7 @@ import { useRouter } from "expo-router";
 import { useState, useEffect, useRef } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { sendOTP, verifyOTP } from "../services/otp";
 
 export default function RegisterOTP() {
   const router = useRouter();
@@ -24,53 +25,31 @@ export default function RegisterOTP() {
 
   const otpRefs = Array(6).fill(null).map(() => useRef<TextInput>(null));
 
-  const sendOTP = async () => {
+  const handleSendOTP = async () => {
     if (!email) {
       setError("Vui lòng nhập email!");
       return;
     }
     try {
-      const response = await fetch("http://localhost:3000/api/OTP/send", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ gmail: email }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setTimer(60);
-        setResendDisabled(true);
-        setIsOTPSent(true);
-        setError("");
-      } else {
-        setError(data.message || "Lỗi khi gửi OTP");
-      }
-    } catch (err) {
-      setError("Không thể kết nối đến server");
+      await sendOTP(email);
+      setTimer(60);
+      setResendDisabled(true);
+      setIsOTPSent(true);
+      setError("");
+    } catch (err: any) {
+      setError(err.message);
     }
   };
 
-  const verifyOTP = async (otpValue: string) => {
+  const handleVerifyOTP = async (otpValue: string) => {
     if (isVerifying) return;
 
     setIsVerifying(true);
     try {
-      const response = await fetch("http://localhost:3000/api/OTP/verify", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ gmail: email, OTP: otpValue }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        router.push({ pathname: "/register", params: { email } });
-      } else {
-        setError(data.message || "OTP không đúng");
-      }
-    } catch (err) {
-      setError("Không thể kết nối đến server");
+      await verifyOTP(email, otpValue);
+      router.push({ pathname: "/register", params: { email } });
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setIsVerifying(false);
     }
@@ -106,10 +85,9 @@ export default function RegisterOTP() {
         otpRefs[index - 1].current?.focus();
       }
 
-      // Tính toán OTP ngay tại đây và gọi verifyOTP
       if (index === 5 && value !== "" && !error && !isVerifying) {
-        const enteredOTP = [...newOtp].join(""); // Sử dụng newOtp để đảm bảo giá trị mới nhất
-        verifyOTP(enteredOTP);
+        const enteredOTP = [...newOtp].join("");
+        handleVerifyOTP(enteredOTP);
       }
     }
   };
@@ -144,7 +122,7 @@ export default function RegisterOTP() {
             onChangeText={setEmail}
             autoCapitalize="none"
           />
-          <TouchableOpacity style={styles.button} onPress={sendOTP}>
+          <TouchableOpacity style={styles.button} onPress={handleSendOTP}>
             <Text style={styles.buttonText}>Gửi OTP</Text>
           </TouchableOpacity>
         </>
@@ -174,7 +152,7 @@ export default function RegisterOTP() {
           </View>
 
           <View style={styles.resendContainer}>
-            <TouchableOpacity disabled={resendDisabled} onPress={sendOTP}>
+            <TouchableOpacity disabled={resendDisabled} onPress={handleSendOTP}>
               <Text
                 style={[styles.resendText, resendDisabled && { color: "#ccc" }]}
               >
@@ -189,7 +167,7 @@ export default function RegisterOTP() {
 
           <TouchableOpacity
             style={[styles.button, isVerifying && styles.buttonDisabled]}
-            onPress={() => verifyOTP(otp.join(""))} // Truyền giá trị OTP trực tiếp
+            onPress={() => handleVerifyOTP(otp.join(""))}
             disabled={isVerifying}
           >
             <Text style={styles.buttonText}>Xác thực</Text>

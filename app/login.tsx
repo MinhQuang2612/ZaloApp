@@ -153,7 +153,7 @@ export default function Login() {
 
       <Text style={styles.registerText}>
         Bạn chưa có tài khoản?{" "}
-        <Text style={styles.registerLink} onPress={() => router.push("/register")}>
+        <Text style={styles.registerLink} onPress={() => router.push("/register_otp")}>
           Đăng ký ngay
         </Text>
       </Text>
