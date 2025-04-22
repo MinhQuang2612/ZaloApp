@@ -74,7 +74,7 @@ export const fetchUserGroups = async (userID: string): Promise<Group[]> => {
 
 export const fetchGroupMembers = async (groupID: string): Promise<GroupMember[]> => {
   try {
-    const response = await api.get(`/api/group/users/${groupID}`);
+    const response = await api.get(`/api/group/${groupID}/users`);
     return response.data.data || [];
   } catch (error: any) {
     console.error("Lỗi khi lấy thành viên nhóm:", error.message);
