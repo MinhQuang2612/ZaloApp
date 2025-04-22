@@ -13,6 +13,9 @@ import {
   Image,
   Platform,
   Linking,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
+  LayoutChangeEvent,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -379,6 +382,10 @@ export default function Chat() {
   const [stickerSearchTerm, setStickerSearchTerm] = useState("funny");
   const insets = useSafeAreaInsets();
   const GIPHY_API_KEY = "ahUloRbYoMUhR2aBUDO2iyNObLH8dnMa";
+  const [contentHeight, setContentHeight] = useState(0);
+  const [layoutHeight, setLayoutHeight] = useState(0);
+  const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   // Load pinned message from AsyncStorage
   const loadPinnedMessage = async (chatID: string) => {
@@ -969,7 +976,7 @@ export default function Chat() {
       senderID: currentUserID,
       receiverID: userID,
       messageTypeID: "type2",
-      context: "Đang tải...",
+      context: fileUri, // Hiển thị ngay ảnh cho người gửi
       messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
@@ -978,6 +985,7 @@ export default function Chat() {
     };
 
     setMessages((prev) => [...prev, tempMessage]);
+    scrollToBottom();
 
     try {
       const fileBase64 = await convertFileToBase64(fileUri);
@@ -1039,7 +1047,7 @@ export default function Chat() {
       senderID: currentUserID,
       receiverID: userID,
       messageTypeID: "type3",
-      context: "Đang tải...",
+      context: fileUri, // Hiển thị ngay video cho người gửi
       messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
@@ -1048,6 +1056,7 @@ export default function Chat() {
     };
 
     setMessages((prev) => [...prev, tempMessage]);
+    scrollToBottom();
 
     try {
       const fileBase64 = await convertFileToBase64(fileUri);
@@ -1092,7 +1101,7 @@ export default function Chat() {
       senderID: currentUserID,
       receiverID: userID,
       messageTypeID: "type5",
-      context: "Đang tải...",
+      context: fileUri, // Hiển thị ngay file cho người gửi
       messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
@@ -1101,6 +1110,7 @@ export default function Chat() {
     };
 
     setMessages((prev) => [...prev, tempMessage]);
+    scrollToBottom();
 
     try {
       const fileBase64 = await convertFileToBase64(fileUri);
@@ -1205,7 +1215,7 @@ export default function Chat() {
         senderID: currentUserID,
         receiverID: userID,
         messageTypeID: "type6",
-        context: "Đang tải...",
+        context: uri, // Hiển thị ngay audio cho người gửi
         messageID,
         createdAt: new Date().toISOString(),
         seenStatus: [],
@@ -1214,6 +1224,7 @@ export default function Chat() {
       };
 
       setMessages((prev) => [...prev, tempMessage]);
+      scrollToBottom();
 
       const fileBase64 = await convertFileToBase64(uri);
       const newMessage: Message = {
@@ -1248,11 +1259,46 @@ export default function Chat() {
     }
   };
 
-  useEffect(() => {
-    if (flatListRef.current && messages.length > 0) {
-      flatListRef.current.scrollToEnd({ animated: true });
+  // Thêm hàm scrollToBottom
+  const scrollToBottom = useCallback(() => {
+    if (flatListRef.current && shouldScrollToBottom) {
+      flatListRef.current.scrollToEnd({ animated: !isInitialLoad });
     }
-  }, [messages]);
+  }, [shouldScrollToBottom, isInitialLoad]);
+
+  // Xóa useEffect cũ và thay thế bằng các hàm xử lý scroll mới
+  const handleContentSizeChange = useCallback((width: number, height: number) => {
+    setContentHeight(height);
+    if (shouldScrollToBottom) {
+      scrollToBottom();
+    }
+  }, [shouldScrollToBottom, scrollToBottom]);
+
+  const handleLayout = useCallback((event: LayoutChangeEvent) => {
+    const { layout } = event.nativeEvent;
+    setLayoutHeight(layout.height);
+    if (shouldScrollToBottom) {
+      scrollToBottom();
+    }
+  }, [shouldScrollToBottom, scrollToBottom]);
+
+  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const paddingToBottom = 20;
+    const isCloseToBottom = contentSize.height - contentOffset.y - layoutMeasurement.height < paddingToBottom;
+    setShouldScrollToBottom(isCloseToBottom);
+  }, []);
+
+  // Thêm useEffect để xử lý scroll khi vào chat
+  useEffect(() => {
+    if (messages.length > 0 && isInitialLoad) {
+      const timer = setTimeout(() => {
+        scrollToBottom();
+        setIsInitialLoad(false);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [messages.length, isInitialLoad, scrollToBottom]);
 
   const renderItem = useCallback(
     ({ item }: { item: Message }) => (
@@ -1269,11 +1315,11 @@ export default function Chat() {
     [currentUserID, userID]
   );
 
-  const getItemLayout = (data: ArrayLike<Message> | null | undefined, index: number) => ({
-    length: 100,
-    offset: 100 * index,
-    index,
-  });
+  const getItemLayout = (data: ArrayLike<Message> | null | undefined, index: number) => {
+    const length = 100;
+    const offset = length * index;
+    return { length, offset, index };
+  };
 
   const renderPinnedMessage = () => {
     if (!pinnedMessageID) return null;
@@ -1347,6 +1393,16 @@ export default function Chat() {
         windowSize={5}
         extraData={messages}
         getItemLayout={getItemLayout}
+        onContentSizeChange={handleContentSizeChange}
+        onLayout={handleLayout}
+        onScroll={handleScroll}
+        maintainVisibleContentPosition={{
+          minIndexForVisible: 0,
+          autoscrollToTopThreshold: 10,
+        }}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        updateCellsBatchingPeriod={50}
       />
 
       <View style={[styles.inputContainer, { paddingBottom: insets.bottom }]}>
