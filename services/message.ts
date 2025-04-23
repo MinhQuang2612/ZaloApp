@@ -3,12 +3,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export interface Message {
   senderID: string;
-  receiverID?: string;
-  messageTypeID: string;
-  context: string;
+  receiverID?: string; // Chỉ có trong SingleChat
+  messageTypeID: string; // Có thể không có trong GroupChat
+  context: string; // Sẽ ánh xạ từ content nếu cần
   createdAt: string;
-  groupID?: string;
-  messageID?: string;
+  groupID?: string; // Chỉ có trong GroupChat
+  messageID?: string; // Có trong GroupChat, có thể có trong SingleChat
   seenStatus?: string[];
   file?: {
     name: string;
@@ -48,7 +48,23 @@ export const fetchMessages = async (receiverID: string, isGroup: boolean = false
       if (!receiverID) throw new Error("Thiếu receiverID.");
       response = await api.get(`/api/message/${userID1}/${receiverID}`);
     }
-    return response.data || [];
+
+    // Ánh xạ dữ liệu từ API (content -> context, đảm bảo đầy đủ các trường)
+    const messages = (response.data || []).map((msg: any) => ({
+      senderID: msg.senderID,
+      receiverID: msg.receiverID || undefined, // Chỉ có trong SingleChat
+      messageTypeID: msg.messageTypeID || "type1", // Mặc định là type1 nếu không có
+      context: msg.content || msg.context || "", // Ánh xạ content thành context
+      createdAt: msg.createdAt || new Date().toISOString(),
+      groupID: msg.groupID || undefined, // Chỉ có trong GroupChat
+      messageID: msg.messageID || undefined, // Có trong GroupChat
+      seenStatus: msg.seenStatus || [],
+      file: msg.file || undefined,
+      deleteStatusByUser: msg.deleteStatusByUser || undefined,
+      recallStatus: msg.recallStatus || undefined,
+    }));
+
+    return messages;
   } catch (error: any) {
     console.error("Lỗi khi lấy tin nhắn:", error.message);
     return [];
