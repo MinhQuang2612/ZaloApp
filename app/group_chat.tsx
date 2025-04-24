@@ -22,7 +22,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fetchMessages, Message } from "../services/message";
 import { fetchUserGroups, fetchGroupMembers, GroupMember, Group } from "../services/group";
 import { fetchContacts, Contact } from "../services/contacts";
-import socket, { connectSocket, deleteMessage, recallMessage, registerSocketListeners, removeSocketListeners } from "../services/socket";
+import socket, { connectSocket, deleteMessage, recallMessage, registerSocketListeners, removeSocketListeners, joinGroup } from "../services/socket";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
@@ -385,9 +385,14 @@ export default function GroupChat() {
     try {
       const response = await api.get(`/api/user/${userID}`);
       const userData = response.data;
-      return userData.avatar || "https://randomuser.me/api/portraits/men/1.jpg";
+      if (userData && userData.avatar && userData.avatar.trim() !== "") {
+        return userData.avatar;
+      }
+      // Trả về avatar mặc định nếu không có
+      return "https://randomuser.me/api/portraits/men/1.jpg";
     } catch (error) {
       console.error(`Lỗi khi lấy avatar của user ${userID}:`, error);
+      // Trả về avatar mặc định nếu có lỗi
       return "https://randomuser.me/api/portraits/men/1.jpg";
     }
   };
@@ -542,147 +547,180 @@ export default function GroupChat() {
     }
   };
 
-  const setupSocketListeners = useCallback(() => {
-    const listeners = [
-      {
-        event: "receiveMessage",
-        handler: async (message: Message) => {
-          console.log("GroupChat.tsx: Received message:", message);
-          if (message.groupID === groupID) {
-            const avatar = await fetchUserAvatar(message.senderID);
-            const messageWithAvatar = { ...message, senderAvatar: avatar };
-            setMessages((prev) => {
-              const exists = prev.some((msg) => msg.messageID === message.messageID);
-              if (!exists) {
-                return [...prev, messageWithAvatar];
-              }
-              return prev;
-            });
-            if (isAtBottom) {
-              scrollToBottom(true);
-            } else {
-              setShowScrollButton(true);
-            }
-          }
-        },
-      },
-      {
-        event: "updateGroupChatSeenStatus",
-        handler: (messageID: string, seenByUserID: string) => {
-          console.log("GroupChat.tsx: Update seen status for messageID:", messageID);
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.messageID === messageID
-                ? { ...msg, seenStatus: [...(msg.seenStatus || []), seenByUserID] }
-                : msg
-            )
-          );
-        },
-      },
-      {
-        event: "deletedGroupMessage",
-        handler: (messageID: string) => {
-          console.log("GroupChat.tsx: Tin nhắn đã bị xóa:", messageID);
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.messageID === messageID
-                ? { ...msg, deleteStatusByUser: [...(msg.deleteStatusByUser || []), currentUserID!] }
-                : msg
-            )
-          );
-          saveMessageStatus(messageID, "deleted");
-        },
-      },
-      {
-        event: "recalledGroupMessage",
-        handler: (messageID: string) => {
-          console.log("GroupChat.tsx: Tin nhắn đã được thu hồi:", messageID);
-          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID!));
-          removeMessageStatus(messageID);
-        },
-      },
-      {
-        event: "newMember",
-        handler: (userID: string) => {
-          console.log("Thành viên mới tham gia nhóm:", userID);
-          Alert.alert("Thông báo", `Thành viên mới ${userID} đã tham gia nhóm.`);
-          fetchGroupDetails(currentUserID!, groupID as string);
-        },
-      },
-      {
-        event: "groupDeleted",
-        handler: (deletedGroupID: string) => {
-          console.log("Nhóm đã bị xóa:", deletedGroupID);
-          if (deletedGroupID === groupID) {
-            socket.emit("leaveGroup", groupID);
-            Alert.alert("Thông báo", "Nhóm đã bị xóa.");
-            router.replace("/home");
-          }
-        },
-      },
-      {
-        event: "memberKicked",
-        handler: ({ userID, groupID: kickedGroupID }: { userID: string; groupID: string }) => {
-          console.log("Thành viên bị kick:", userID, "từ nhóm:", kickedGroupID);
-          if (kickedGroupID === groupID) {
-            if (userID === currentUserID) {
-              socket.emit("leaveGroup", groupID);
-              Alert.alert("Thông báo", "Bạn đã bị kick khỏi nhóm.");
-              router.replace("/home");
-            } else {
-              fetchGroupDetails(currentUserID!, groupID as string);
-            }
-          }
-        },
-      },
-      {
-        event: "memberLeft",
-        handler: ({ userID, groupID: leftGroupID }: { userID: string; groupID: string }) => {
-          console.log("Thành viên rời nhóm:", userID, "từ nhóm:", leftGroupID);
-          if (leftGroupID === groupID && userID !== currentUserID) {
-            fetchGroupDetails(currentUserID!, groupID as string);
-          }
-        },
-      },
-      {
-        event: "connect",
-        handler: () => {
-          console.log("GroupChat.tsx: Socket connected:", socket.id);
-          if (currentUserID && groupID) {
-            socket.emit("joinGroup", currentUserID, groupID, (response: string) => {
-              console.log("GroupChat.tsx: Join group response:", response);
-              if (response !== "Đã nhận") {
-                Alert.alert("Lỗi", "Không thể tham gia nhóm. Vui lòng thử lại.");
-              }
-            });
-          }
-        },
-      },
-      {
-        event: "disconnect",
-        handler: (reason: string) => {
-          console.log("GroupChat.tsx: Socket disconnected:", reason);
-        },
-      },
-    ];
+  const checkGroupMembership = async (userID: string, groupID: string): Promise<boolean> => {
+    try {
+      const groupMembers = await fetchGroupMembers(groupID);
+      return groupMembers.some(member => member.userID === userID);
+    } catch (error) {
+      console.error("Lỗi khi kiểm tra thành viên nhóm:", error);
+      return false;
+    }
+  };
 
-    registerSocketListeners(listeners);
+  const setupSocketListeners = () => {
+    if (!socket) return;
+
+    const handleReceiveMessage = async (message: GroupMessage) => {
+      console.log("GroupChat.tsx: Received message:", message);
+      if (message.groupID === groupID) {
+        const senderAvatar = await fetchUserAvatar(message.senderID);
+        setMessages((prev) => {
+          const messageExists = prev.some((m) => m.messageID === message.messageID);
+          if (messageExists) {
+            return prev.map((m) => (m.messageID === message.messageID ? { ...message, senderAvatar } : m));
+          }
+          return [...prev, { ...message, senderAvatar }];
+        });
+        if (isAtBottom) {
+          scrollToBottom();
+        } else {
+          setShowScrollButton(true);
+        }
+      }
+    };
+
+    const handleUpdateSeenStatus = (data: { messageID: string; userID: string }) => {
+      console.log("GroupChat.tsx: Update seen status:", data);
+      if (data.userID !== currentUserID) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.messageID === data.messageID
+              ? {
+                  ...msg,
+                  seenStatus: [...(msg.seenStatus || []), data.userID],
+                }
+              : msg
+          )
+        );
+      }
+    };
+
+    const handleDeletedMessage = (data: { messageID: string; userID: string }) => {
+      console.log("GroupChat.tsx: Message deleted:", data);
+      if (data.userID !== currentUserID) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.messageID === data.messageID
+              ? {
+                  ...msg,
+                  deleteStatusByUser: [...(msg.deleteStatusByUser || []), data.userID],
+                }
+              : msg
+          )
+        );
+      }
+    };
+
+    const handleRecalledMessage = (data: { messageID: string; userID: string }) => {
+      console.log("GroupChat.tsx: Message recalled:", data);
+      if (data.userID !== currentUserID) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.messageID === data.messageID
+              ? {
+                  ...msg,
+                  recallStatus: true,
+                }
+              : msg
+          )
+        );
+      }
+    };
+
+    socket.on("receiveMessage", handleReceiveMessage);
+    socket.on("updateGroupChatSeenStatus", handleUpdateSeenStatus);
+    socket.on("deletedGroupMessage", handleDeletedMessage);
+    socket.on("recalledGroupMessage", handleRecalledMessage);
 
     return () => {
-      removeSocketListeners([
-        "connect",
-        "receiveMessage",
-        "updateGroupChatSeenStatus",
-        "deletedGroupMessage",
-        "recalledGroupMessage",
-        "newMember",
-        "groupDeleted",
-        "memberKicked",
-        "memberLeft",
-        "disconnect",
-      ]);
+      socket.off("receiveMessage", handleReceiveMessage);
+      socket.off("updateGroupChatSeenStatus", handleUpdateSeenStatus);
+      socket.off("deletedGroupMessage", handleDeletedMessage);
+      socket.off("recalledGroupMessage", handleRecalledMessage);
     };
-  }, [groupID, currentUserID, isAtBottom]);
+  };
+
+  const initializeSocketAndData = async () => {
+    setLoading(true);
+  
+    try {
+      await connectSocket();
+      console.log("GroupChat.tsx: Socket connected successfully");
+    } catch (error) {
+      console.error("Không thể kết nối socket:", error);
+      Alert.alert(
+        "Lỗi",
+        "Không thể kết nối tới server. Vui lòng kiểm tra kết nối mạng hoặc liên hệ hỗ trợ.",
+        [
+          { text: "OK", onPress: () => router.back() }
+        ]
+      );
+      setLoading(false);
+      return;
+    }
+  
+    const userData = await AsyncStorage.getItem("user");
+    console.log("GroupChat.tsx: Raw userData from AsyncStorage:", userData);
+    if (!userData) {
+      console.error("Không tìm thấy user trong AsyncStorage");
+      Alert.alert("Lỗi", "Không tìm thấy thông tin người dùng. Vui lòng đăng nhập lại.");
+      router.replace("/login");
+      setLoading(false);
+      return;
+    }
+  
+    const user = JSON.parse(userData);
+    console.log("GroupChat.tsx: Parsed user object:", user);
+    const userIDValue = user?.userID;
+    console.log("GroupChat.tsx: Extracted userIDValue:", userIDValue);
+    if (!userIDValue || typeof userIDValue !== "string" || userIDValue.trim() === "") {
+      console.error("currentUserID không hợp lệ:", userIDValue);
+      Alert.alert("Lỗi", "Thông tin người dùng không hợp lệ. Vui lòng đăng nhập lại.");
+      await AsyncStorage.removeItem("user");
+      router.replace("/login");
+      setLoading(false);
+      return;
+    }
+    setCurrentUserID(userIDValue);
+  
+    if (!groupID || typeof groupID !== "string" || groupID.trim() === "") {
+      console.error("groupID không hợp lệ:", groupID);
+      Alert.alert("Lỗi", "Không thể tải nhóm chat. Vui lòng thử lại.");
+      router.back();
+      setLoading(false);
+      return;
+    }
+  
+    const isMember = await checkGroupMembership(userIDValue, groupID);
+    if (!isMember) {
+      console.error("User không phải là thành viên của nhóm");
+      Alert.alert("Lỗi", "Bạn không phải là thành viên của nhóm này");
+      router.back();
+      setLoading(false);
+      return;
+    }
+  
+    try {
+      console.log("GroupChat.tsx: Joining group:", { userID: userIDValue, groupID });
+      await joinGroup(userIDValue, groupID);
+      console.log("GroupChat.tsx: Successfully joined group:", groupID);
+    } catch (error: any) {
+      if (error.message === "user đã là thành viên của nhóm này") {
+        console.log("GroupChat.tsx: User is already a member of the group");
+      } else {
+        console.error("Lỗi khi tham gia vào nhóm:", error);
+        Alert.alert("Lỗi", "Không thể tham gia vào nhóm. Vui lòng thử lại.");
+        setLoading(false);
+        return;
+      }
+    }
+  
+    await fetchGroupDetails(userIDValue, groupID);
+    await loadMessagesWithCache(groupID);
+    await loadForwardOptions(userIDValue);
+    await loadPinnedMessage(groupID);
+    setLoading(false);
+  };
 
   useEffect(() => {
     if (showStickerPicker) {
@@ -691,50 +729,6 @@ export default function GroupChat() {
   }, [stickerSearchTerm, showStickerPicker]);
 
   useEffect(() => {
-    const initializeSocketAndData = async () => {
-      setLoading(true);
-
-      try {
-        await connectSocket();
-      } catch (error) {
-        console.error("Không thể kết nối socket:", error);
-        Alert.alert("Lỗi", "Không thể kết nối tới server. Vui lòng thử lại sau.");
-        setLoading(false);
-        return;
-      }
-
-      const userData = await AsyncStorage.getItem("user");
-      if (!userData) {
-        console.error("Không tìm thấy user trong AsyncStorage");
-        router.replace("/login");
-        setLoading(false);
-        return;
-      }
-
-      const user = JSON.parse(userData);
-      const userIDValue = user.userID;
-      if (!userIDValue) {
-        console.error("currentUserID không hợp lệ:", userIDValue);
-        router.replace("/login");
-        setLoading(false);
-        return;
-      }
-      setCurrentUserID(userIDValue);
-
-      if (!groupID) {
-        console.error("groupID không hợp lệ:", groupID);
-        setLoading(false);
-        return;
-      }
-
-      await fetchGroupDetails(userIDValue, groupID as string);
-      await loadMessagesWithCache(groupID as string);
-      await loadForwardOptions(userIDValue);
-      await loadPinnedMessage(groupID as string);
-      setupSocketListeners();
-      setLoading(false);
-    };
-
     initializeSocketAndData();
 
     return () => {
@@ -751,7 +745,16 @@ export default function GroupChat() {
         "disconnect",
       ]);
     };
-  }, [groupID, setupSocketListeners]);
+  }, [groupID]);
+
+  useEffect(() => {
+    if (socket) {
+      const cleanup = setupSocketListeners();
+      return () => {
+        if (cleanup) cleanup();
+      };
+    }
+  }, [socket, groupID, currentUserID]);
 
   useEffect(() => {
     if (currentUserID && messages.length > 0) {
@@ -776,47 +779,84 @@ export default function GroupChat() {
   }, [messages, currentUserID, groupID]);
 
   const handleSendMessage = async () => {
-    if (!inputText.trim() || !groupID || !currentUserID) {
-      console.log("GroupChat.tsx: Invalid input:", { inputText, groupID, currentUserID });
+    if (loading) {
+      Alert.alert("Thông báo", "Đang tải dữ liệu, vui lòng đợi...");
       return;
     }
-
+  
+    if (!inputText.trim() || !groupID || !currentUserID) {
+      console.log("GroupChat.tsx: Invalid input:", { inputText, groupID, currentUserID });
+      Alert.alert("Lỗi", "Không thể gửi tin nhắn: Thông tin không hợp lệ. Vui lòng đăng nhập lại.");
+      return;
+    }
+  
     const messageID = `${socket.id}-${Date.now()}`;
     const newMessage: Message = {
       senderID: currentUserID,
-      groupID: groupID as string,
+      receiverID: null,
+      groupID: groupID,
       messageTypeID: "type1",
       context: inputText,
-      messageID,
+      messageID: messageID,
       createdAt: new Date().toISOString(),
       seenStatus: [],
       deleteStatusByUser: [],
-      recallStatus: false,
-      receiverID: undefined,
+      recallStatus: false
     };
-
-    console.log("GroupChat.tsx: Sending message:", newMessage);
-
-    try {
-      socket.emit("sendMessage", newMessage, async (response: SocketResponse) => {
-        console.log("GroupChat.tsx: Server response for sendMessage:", response);
-        if (response === "Đã nhận") {
-          const senderAvatar = await fetchUserAvatar(currentUserID);
-          setMessages((prev) => [...prev, { ...newMessage, senderAvatar }]);
-          setInputText("");
-          if (isAtBottom) {
-            scrollToBottom();
-          } else {
-            setShowScrollButton(true);
-          }
+  
+    console.log("GroupChat.tsx: Sending message data:", newMessage);
+  
+    const sendMessageWithRetry = async (retryCount = 3, delay = 2000) => {
+      try {
+        const senderAvatar = await fetchUserAvatar(currentUserID);
+        setMessages((prev) => [...prev, { ...newMessage, senderAvatar }]);
+        setInputText("");
+        if (isAtBottom) {
+          scrollToBottom();
         } else {
-          console.log("GroupChat.tsx: Failed to send message, response:", response);
-          Alert.alert("Lỗi", "Không thể gửi tin nhắn. Vui lòng thử lại.");
+          setShowScrollButton(true);
         }
-      });
+  
+        return new Promise<void>((resolve, reject) => {
+          socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
+            console.log("GroupChat.tsx: Server response for sendMessage:", response);
+            if (response === "Đã nhận") {
+              resolve();
+            } else {
+              console.log("GroupChat.tsx: Failed to send message, response:", response);
+              reject(new Error(response));
+            }
+          });
+        });
+      } catch (error: any) {
+        if (retryCount > 0) {
+          console.log(`Retrying send message... Attempts left: ${retryCount}`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return sendMessageWithRetry(retryCount - 1, delay * 2);
+        }
+        throw error;
+      }
+    };
+  
+    try {
+      await sendMessageWithRetry();
     } catch (error: any) {
       console.error("Lỗi khi gửi tin nhắn nhóm:", error.message);
-      Alert.alert("Lỗi", "Không thể gửi tin nhắn. Vui lòng thử lại.");
+      setMessages((prev) => prev.filter(msg => msg.messageID !== messageID));
+      Alert.alert(
+        "Lỗi",
+        `Không thể gửi tin nhắn: ${error.message}`,
+        [
+          { text: "Hủy", style: "cancel" },
+          {
+            text: "Thử lại",
+            onPress: () => {
+              setInputText(newMessage.context);
+              handleSendMessage();
+            }
+          }
+        ]
+      );
     }
   };
 
@@ -830,6 +870,7 @@ export default function GroupChat() {
     const messageID = `${socket.id}-${Date.now()}`;
     const newMessage: Message = {
       senderID: currentUserID,
+      receiverID: null, // Thêm receiverID: undefined
       groupID: groupID as string,
       messageTypeID: "type4",
       context: stickerUrl,
@@ -838,7 +879,6 @@ export default function GroupChat() {
       seenStatus: [],
       deleteStatusByUser: [],
       recallStatus: false,
-      receiverID: undefined,
     };
 
     try {
@@ -895,6 +935,7 @@ export default function GroupChat() {
     const messageID = `${socket.id}-${Date.now()}`;
     const tempMessage: Message = {
       senderID: currentUserID,
+      receiverID: null, // Thêm receiverID: undefined
       groupID: groupID as string,
       messageTypeID: "type2",
       context: "Đang tải...",
@@ -903,7 +944,6 @@ export default function GroupChat() {
       seenStatus: [],
       deleteStatusByUser: [],
       recallStatus: false,
-      receiverID: undefined,
     };
 
     const senderAvatar = await fetchUserAvatar(currentUserID);
@@ -926,7 +966,6 @@ export default function GroupChat() {
         seenStatus: [],
         deleteStatusByUser: [],
         recallStatus: false,
-        receiverID: undefined,
         file: { name: `image-${Date.now()}.jpg`, data: fileBase64 },
       };
 
@@ -973,6 +1012,7 @@ export default function GroupChat() {
     const messageID = `${socket.id}-${Date.now()}`;
     const tempMessage: Message = {
       senderID: currentUserID,
+      receiverID: null, // Thêm receiverID: undefined
       groupID: groupID as string,
       messageTypeID: "type3",
       context: "Đang tải...",
@@ -981,7 +1021,6 @@ export default function GroupChat() {
       seenStatus: [],
       deleteStatusByUser: [],
       recallStatus: false,
-      receiverID: undefined,
     };
 
     const senderAvatar = await fetchUserAvatar(currentUserID);
@@ -1004,7 +1043,6 @@ export default function GroupChat() {
         seenStatus: [],
         deleteStatusByUser: [],
         recallStatus: false,
-        receiverID: undefined,
         file: { name: `video-${Date.now()}.mp4`, data: fileBase64 },
       };
 
@@ -1034,6 +1072,7 @@ export default function GroupChat() {
     const messageID = `${socket.id}-${Date.now()}`;
     const tempMessage: Message = {
       senderID: currentUserID,
+      receiverID: null, // Thêm receiverID: undefined
       groupID: groupID as string,
       messageTypeID: "type5",
       context: "Đang tải...",
@@ -1042,7 +1081,6 @@ export default function GroupChat() {
       seenStatus: [],
       deleteStatusByUser: [],
       recallStatus: false,
-      receiverID: undefined,
     };
 
     const senderAvatar = await fetchUserAvatar(currentUserID);
@@ -1065,7 +1103,6 @@ export default function GroupChat() {
         seenStatus: [],
         deleteStatusByUser: [],
         recallStatus: false,
-        receiverID: undefined,
         file: { name: fileName, data: fileBase64 },
       };
 
@@ -1156,6 +1193,7 @@ export default function GroupChat() {
       messageID = `${socket.id}-${Date.now()}`;
       const tempMessage: Message = {
         senderID: currentUserID,
+        receiverID: null, // Thêm receiverID: undefined
         groupID: groupID as string,
         messageTypeID: "type6",
         context: "Đang tải...",
@@ -1164,7 +1202,6 @@ export default function GroupChat() {
         seenStatus: [],
         deleteStatusByUser: [],
         recallStatus: false,
-        receiverID: undefined,
       };
 
       const senderAvatar = await fetchUserAvatar(currentUserID);
@@ -1186,7 +1223,6 @@ export default function GroupChat() {
         seenStatus: [],
         deleteStatusByUser: [],
         recallStatus: false,
-        receiverID: undefined,
         file: { name: `voice-${Date.now()}.m4a`, data: fileBase64 },
       };
 

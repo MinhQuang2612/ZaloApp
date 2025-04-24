@@ -3,12 +3,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export interface Message {
   senderID: string;
-  receiverID?: string; // Chỉ có trong SingleChat
-  messageTypeID: string; // Có thể không có trong GroupChat
-  context: string; // Sẽ ánh xạ từ content nếu cần
+  receiverID?: string | null; 
+  messageTypeID: string; 
+  context: string; 
   createdAt: string;
-  groupID?: string; // Chỉ có trong GroupChat
-  messageID?: string; // Có trong GroupChat, có thể có trong SingleChat
+  groupID?: string;
+  messageID?: string; 
   seenStatus?: string[];
   file?: {
     name: string;

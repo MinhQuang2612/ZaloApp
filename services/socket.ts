@@ -56,7 +56,7 @@ export const joinGroup = (userID: string, groupID: string): Promise<string> => {
   return new Promise((resolve, reject) => {
     socket.emit("joinGroup", userID, groupID, (response: string) => {
       console.log("Join group response:", response);
-      if (response === "Tham gia nhóm thành công" || response === "user đã là thành viên của nhóm này") {
+      if (response === "Tham gia nhóm thành công") {
         resolve(response);
       } else {
         reject(new Error(response));
