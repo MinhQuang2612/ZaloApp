@@ -41,6 +41,11 @@ type HomeGroupMessage = {
 
 type CombinedMessage = { type: "single"; data: HomeMessage } | { type: "group"; data: HomeGroupMessage };
 
+// Type guard để kiểm tra CombinedMessage là tin nhắn nhóm
+const isGroupMessage = (msg: CombinedMessage): msg is { type: "group"; data: HomeGroupMessage } => {
+  return msg.type === "group";
+};
+
 export default function Home() {
   const [messages, setMessages] = useState<CombinedMessage[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -121,6 +126,17 @@ export default function Home() {
   const getUserAvatar = (userID: string): string | null => {
     const contact = contacts.find((c) => c.userID === userID);
     return contact?.avatar || null;
+  };
+
+  // Hàm lấy thời điểm xem cuối cùng của nhóm từ AsyncStorage
+  const getLastSeenTimestamp = async (groupID: string): Promise<string | null> => {
+    try {
+      const lastSeen = await AsyncStorage.getItem(`lastSeen_${groupID}`);
+      return lastSeen;
+    } catch (error) {
+      console.error(`Lỗi khi lấy lastSeenTimestamp cho nhóm ${groupID}:`, error);
+      return null;
+    }
   };
 
   const loadMessages = useCallback(async (userID: string) => {
@@ -216,8 +232,16 @@ export default function Home() {
       if (userGroups && userGroups.length > 0) {
         const groupMessagePromises = userGroups.map(async (group) => {
           const groupMessages = await fetchMessages(group.groupID, true);
+          
+          // Lấy thời điểm xem cuối cùng của nhóm
+          const lastSeenTimestamp = await getLastSeenTimestamp(group.groupID);
+          const lastSeenDate = lastSeenTimestamp ? new Date(lastSeenTimestamp) : null;
+
+          // Chỉ đếm tin nhắn chưa đọc sau lastSeenTimestamp
           const unreadCount = groupMessages.filter(
-            (msg) => !msg.seenStatus?.includes(userID)
+            (msg) =>
+              !msg.seenStatus?.includes(userID) &&
+              (!lastSeenDate || new Date(msg.createdAt) > lastSeenDate)
           ).length;
 
           const latestMessage = groupMessages.sort(
@@ -283,6 +307,38 @@ export default function Home() {
     }
   }, []);
 
+  const updateGroupUnreadCount = async (groupID: string, userID: string) => {
+    try {
+      const groupMessages = await fetchMessages(groupID, true);
+      
+      // Lấy thời điểm xem cuối cùng của nhóm
+      const lastSeenTimestamp = await getLastSeenTimestamp(groupID);
+      const lastSeenDate = lastSeenTimestamp ? new Date(lastSeenTimestamp) : null;
+
+      // Chỉ đếm tin nhắn chưa đọc sau lastSeenTimestamp
+      const unreadCount = groupMessages.filter(
+        (msg) =>
+          !msg.seenStatus?.includes(userID) &&
+          (!lastSeenDate || new Date(msg.createdAt) > lastSeenDate)
+      ).length;
+
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (isGroupMessage(msg) && msg.data.groupID === groupID) {
+            const data = msg.data;
+            return {
+              ...msg,
+              data: { ...data, unreadCount },
+            };
+          }
+          return msg;
+        })
+      );
+    } catch (error) {
+      console.error(`Lỗi khi cập nhật unreadCount cho nhóm ${groupID}:`, error);
+    }
+  };
+
   const setupSocketListeners = useCallback(() => {
     console.log("Home.tsx: Setting up socket listeners for user:", currentUserID);
     if (!currentUserID) return () => {};
@@ -330,25 +386,21 @@ export default function Home() {
               createdAt: message.createdAt,
               messageID: message.messageID,
               messageTypeID: message.messageTypeID,
-              unreadCount: !message.seenStatus?.includes(currentUserID) ? 1 : 0,
+              unreadCount: 0, // Sẽ tính lại ngay sau đây
             };
 
             console.log("Home.tsx: Adding new group message:", newGroupMessage);
             setMessages((prev) => {
               const existingIndex = prev.findIndex(
-                (msg) => msg.type === "group" && (msg.data as HomeGroupMessage).groupID === message.groupID
+                (msg) => isGroupMessage(msg) && msg.data.groupID === message.groupID
               );
 
               let updatedMessages: CombinedMessage[];
               if (existingIndex !== -1) {
                 updatedMessages = [...prev];
-                const existingMessage = updatedMessages[existingIndex].data as HomeGroupMessage;
                 updatedMessages[existingIndex] = {
                   type: "group",
-                  data: {
-                    ...newGroupMessage,
-                    unreadCount: existingMessage.unreadCount + (newGroupMessage.unreadCount || 0),
-                  },
+                  data: newGroupMessage,
                 };
               } else {
                 updatedMessages = [...prev, { type: "group", data: newGroupMessage }];
@@ -360,6 +412,9 @@ export default function Home() {
               console.log("Home.tsx: Updated messages (group):", sortedMessages);
               return sortedMessages;
             });
+
+            // Cập nhật unreadCount sau khi thêm tin nhắn mới
+            updateGroupUnreadCount(message.groupID, currentUserID);
           } else if (message.senderID === currentUserID || message.receiverID === currentUserID) {
             const contactID =
               message.senderID === currentUserID ? message.receiverID! : message.senderID;
@@ -439,18 +494,25 @@ export default function Home() {
         handler: ({ messageID, seenUserID }: { messageID: string; seenUserID: string }) => {
           if (!isMounted.current) return;
           console.log("Home.tsx: Cập nhật trạng thái đã xem cho tin nhắn nhóm:", messageID, seenUserID);
-          setMessages((prev) =>
-            prev.map((msg) => {
-              if (msg.type === "group" && (msg.data as HomeGroupMessage).messageID === messageID) {
-                const data = msg.data as HomeGroupMessage;
-                return {
-                  ...msg,
-                  data: { ...data, unreadCount: data.unreadCount > 0 ? data.unreadCount - 1 : 0 },
-                };
-              }
-              return msg;
-            })
+
+          const groupMessage = messages.find(
+            (msg) => isGroupMessage(msg) && msg.data.messageID === messageID
           );
+
+          if (groupMessage && isGroupMessage(groupMessage)) {
+            const groupID = groupMessage.data.groupID;
+            updateGroupUnreadCount(groupID, seenUserID);
+          }
+        },
+      },
+      {
+        event: "updateUnreadCount",
+        handler: ({ groupID, userID }: { groupID: string; userID: string }) => {
+          if (!isMounted.current) return;
+          console.log("Home.tsx: Nhận được updateUnreadCount:", { groupID, userID });
+          if (userID === currentUserID) {
+            updateGroupUnreadCount(groupID, userID);
+          }
         },
       },
       {
@@ -493,7 +555,7 @@ export default function Home() {
           saveMessageStatus(data.messageID, "deleted");
           setMessages((prev) =>
             prev.map((msg) => {
-              if (msg.type === "group" && (msg.data as HomeGroupMessage).messageID === data.messageID) {
+              if (isGroupMessage(msg) && msg.data.messageID === data.messageID) {
                 return { ...msg, data: { ...msg.data, context: "Tin nhắn đã bị xóa" } };
               }
               return msg;
@@ -509,7 +571,7 @@ export default function Home() {
           saveMessageStatus(messageID, "recalled");
           setMessages((prev) =>
             prev.map((msg) => {
-              if (msg.type === "group" && (msg.data as HomeGroupMessage).messageID === messageID) {
+              if (isGroupMessage(msg) && msg.data.messageID === messageID) {
                 return { ...msg, data: { ...msg.data, context: "Tin nhắn đã được thu hồi" } };
               }
               return msg;
@@ -552,7 +614,7 @@ export default function Home() {
     return () => {
       removeSocketListeners(listeners.map((l) => l.event));
     };
-  }, [currentUserID, contacts, groups]);
+  }, [currentUserID, contacts, groups, messages]);
 
   const joinRooms = useCallback(() => {
     if (currentUserID) {
@@ -598,6 +660,7 @@ export default function Home() {
 
         await loadMessages(userID);
         await connectSocket();
+        setupSocketListeners();
       } catch (error) {
         console.error("Lỗi khi khởi tạo:", error);
       } finally {
@@ -613,6 +676,7 @@ export default function Home() {
         "receiveMessage",
         "updateSingleChatSeenStatus",
         "updateGroupChatSeenStatus",
+        "updateUnreadCount",
         "deletedSingleMessage",
         "recalledSingleMessage",
         "deletedGroupMessage",
@@ -622,7 +686,7 @@ export default function Home() {
         "newMember",
       ]);
     };
-  }, [loadMessages]);
+  }, [loadMessages, setupSocketListeners]);
 
   useFocusEffect(
     useCallback(() => {
@@ -631,26 +695,12 @@ export default function Home() {
         processedMessageIDs.current.clear();
         console.log("Home.tsx: Cleared processedMessageIDs");
         loadMessages(currentUserID);
-
-        removeSocketListeners([
-          "receiveMessage",
-          "updateSingleChatSeenStatus",
-          "updateGroupChatSeenStatus",
-          "deletedSingleMessage",
-          "recalledSingleMessage",
-          "deletedGroupMessage",
-          "recalledGroupMessage",
-          "connect",
-          "disconnect",
-          "newMember",
-        ]);
-        setupSocketListeners();
       }
 
       return () => {
         console.log("Home.tsx: Screen unfocused");
       };
-    }, [currentUserID, loadMessages, setupSocketListeners])
+    }, [currentUserID, loadMessages])
   );
 
   const onRefresh = async () => {

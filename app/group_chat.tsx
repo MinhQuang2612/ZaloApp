@@ -53,6 +53,7 @@ type GiphySticker = {
 
 type GroupMessage = Message & {
   senderAvatar: string;
+  isDelivered?: boolean;
 };
 
 type ForwardItem = { type: "contact"; data: Contact } | { type: "group"; data: Group };
@@ -202,6 +203,16 @@ const MessageItem = ({
   const isDeletedForUser = item.deleteStatusByUser?.includes(currentUserID || "");
   const isRecalled = item.recallStatus;
 
+  const statusText = () => {
+    if (item.seenStatus?.length && item.seenStatus.length > 1) {
+      return `Đã xem (${item.seenStatus.length - 1})`;
+    }
+    if (item.isDelivered) {
+      return "Đã nhận";
+    }
+    return "Đã gửi";
+  };
+
   return (
     <View
       style={[
@@ -316,9 +327,7 @@ const MessageItem = ({
                 )
               )}
               {item.senderID === currentUserID && !item.recallStatus && !isDeletedForUser && (
-                <Text style={styles.seenText}>
-                  {item.seenStatus?.length && item.seenStatus.length > 1 ? "Đã xem" : "Đã gửi"}
-                </Text>
+                <Text style={styles.seenText}>{statusText()}</Text>
               )}
             </>
           )}
@@ -370,6 +379,31 @@ export default function GroupChat() {
   const insets = useSafeAreaInsets();
   const GIPHY_API_KEY = "ahUloRbYoMUhR2aBUDO2iyNObLH8dnMa";
 
+  // Cache cho avatar
+  const avatarCache = useRef<Map<string, string>>(new Map()).current;
+
+  const getUploadsPath = (): string => {
+    const machine = process.env.EXPO_PUBLIC_MACHINE || "MACHINE_1";
+    if (machine === "MACHINE_1") {
+      return process.env.EXPO_PUBLIC_UPLOADS_PATH_MACHINE_1 || "";
+    } else if (machine === "MACHINE_2") {
+      return process.env.EXPO_PUBLIC_UPLOADS_PATH_MACHINE_2 || "";
+    }
+    return process.env.EXPO_PUBLIC_UPLOADS_PATH || "";
+  };
+
+  const convertFilePathToURL = (context: string): string => {
+    const uploadsPath = getUploadsPath();
+    if (context && (context.startsWith("http://") || context.startsWith("https://"))) {
+      return context;
+    }
+    if (context && context.startsWith(uploadsPath)) {
+      const fileName = context.split(/[\\/]/).pop();
+      return `${process.env.EXPO_PUBLIC_API_URL}/Uploads/${fileName}`;
+    }
+    return context;
+  };
+
   const fetchStickers = async (term: string) => {
     try {
       const BASE_URL = "http://api.giphy.com/v1/stickers/search";
@@ -382,18 +416,23 @@ export default function GroupChat() {
   };
 
   const fetchUserAvatar = async (userID: string): Promise<string> => {
+    if (avatarCache.has(userID)) {
+      return avatarCache.get(userID)!;
+    }
     try {
       const response = await api.get(`/api/user/${userID}`);
       const userData = response.data;
+      let avatar = "https://randomuser.me/api/portraits/men/1.jpg";
       if (userData && userData.avatar && userData.avatar.trim() !== "") {
-        return userData.avatar;
+        avatar = userData.avatar;
       }
-      // Trả về avatar mặc định nếu không có
-      return "https://randomuser.me/api/portraits/men/1.jpg";
+      avatarCache.set(userID, avatar);
+      return avatar;
     } catch (error) {
       console.error(`Lỗi khi lấy avatar của user ${userID}:`, error);
-      // Trả về avatar mặc định nếu có lỗi
-      return "https://randomuser.me/api/portraits/men/1.jpg";
+      const defaultAvatar = "https://randomuser.me/api/portraits/men/1.jpg";
+      avatarCache.set(userID, defaultAvatar);
+      return defaultAvatar;
     }
   };
 
@@ -485,6 +524,14 @@ export default function GroupChat() {
       const messagesWithAvatars = await Promise.all(
         groupMessages.map(async (msg) => {
           const avatar = await fetchUserAvatar(msg.senderID);
+          if (
+            msg.messageTypeID === "type2" ||
+            msg.messageTypeID === "type3" ||
+            msg.messageTypeID === "type5" ||
+            msg.messageTypeID === "type6"
+          ) {
+            msg.context = convertFilePathToURL(msg.context);
+          }
           return { ...msg, senderAvatar: avatar };
         })
       );
@@ -557,25 +604,104 @@ export default function GroupChat() {
     }
   };
 
+  const sendMessage = async (
+    newMessage: Message,
+    onSuccess?: () => void,
+    onFailure?: (error: any) => void
+  ) => {
+    const messageExists = messages.some((msg) => msg.messageID === newMessage.messageID);
+    if (messageExists) {
+      console.log("GroupChat.tsx: Message already sent, skipping:", newMessage.messageID);
+      return;
+    }
+
+    try {
+      if (!socket.connected) {
+        console.log("GroupChat.tsx: Socket not connected, attempting to reconnect...");
+        await connectSocket();
+      }
+
+      const senderAvatar = await fetchUserAvatar(currentUserID!);
+      setMessages((prev) => [...prev, { ...newMessage, senderAvatar, isDelivered: false }]);
+      if (isAtBottom) {
+        scrollToBottom();
+      } else {
+        setShowScrollButton(true);
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        socket.emit("sendMessage", newMessage, async (response: SocketResponse) => {
+          console.log("GroupChat.tsx: Server response:", response);
+          if (response === "Đã nhận" || response === "tin nhắn đã tồn tại") {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.messageID === newMessage.messageID
+                  ? { ...msg, isDelivered: true }
+                  : msg
+              )
+            );
+            await loadMessagesWithCache(groupID as string);
+            if (onSuccess) onSuccess();
+            resolve();
+          } else {
+            console.log("GroupChat.tsx: Failed to send message, response:", response);
+            reject(new Error(response));
+          }
+        });
+      });
+    } catch (error: any) {
+      if (onFailure) onFailure(error);
+      throw error;
+    }
+  };
+
   const setupSocketListeners = () => {
     if (!socket) return;
+
+    socket.on("connect", () => {
+      console.log("GroupChat.tsx: Socket connected");
+      if (currentUserID && groupID) {
+        joinGroup(currentUserID, groupID as string);
+      }
+    });
+
+    socket.on("disconnect", (reason) => {
+      console.log("GroupChat.tsx: Socket disconnected:", reason);
+    });
 
     const handleReceiveMessage = async (message: GroupMessage) => {
       console.log("GroupChat.tsx: Received message:", message);
       if (message.groupID === groupID) {
-        const senderAvatar = await fetchUserAvatar(message.senderID);
         setMessages((prev) => {
           const messageExists = prev.some((m) => m.messageID === message.messageID);
           if (messageExists) {
-            return prev.map((m) => (m.messageID === message.messageID ? { ...message, senderAvatar } : m));
+            console.log("GroupChat.tsx: Message already exists, updating:", message.messageID);
+            return prev.map((m) =>
+              m.messageID === message.messageID
+                ? { ...m, ...message, isDelivered: m.isDelivered ?? true }
+                : m
+            );
           }
-          return [...prev, { ...message, senderAvatar }];
+
+          if (
+            message.messageTypeID === "type2" ||
+            message.messageTypeID === "type3" ||
+            message.messageTypeID === "type5" ||
+            message.messageTypeID === "type6"
+          ) {
+            message.context = convertFilePathToURL(message.context);
+          }
+
+          const updatedMessages = [...prev, { ...message, isDelivered: true }];
+          if (isAtBottom) {
+            scrollToBottom();
+          } else {
+            setShowScrollButton(true);
+          }
+          return updatedMessages;
         });
-        if (isAtBottom) {
-          scrollToBottom();
-        } else {
-          setShowScrollButton(true);
-        }
+
+        socket.emit("updateUnreadCount", { groupID, userID: currentUserID });
       }
     };
 
@@ -633,6 +759,8 @@ export default function GroupChat() {
     socket.on("recalledGroupMessage", handleRecalledMessage);
 
     return () => {
+      socket.off("connect");
+      socket.off("disconnect");
       socket.off("receiveMessage", handleReceiveMessage);
       socket.off("updateGroupChatSeenStatus", handleUpdateSeenStatus);
       socket.off("deletedGroupMessage", handleDeletedMessage);
@@ -644,7 +772,9 @@ export default function GroupChat() {
     setLoading(true);
   
     try {
-      await connectSocket();
+      if (!socket.connected) {
+        await connectSocket();
+      }
       console.log("GroupChat.tsx: Socket connected successfully");
     } catch (error) {
       console.error("Không thể kết nối socket:", error);
@@ -757,43 +887,57 @@ export default function GroupChat() {
   }, [socket, groupID, currentUserID]);
 
   useEffect(() => {
-    if (currentUserID && messages.length > 0) {
+    const markMessagesAsSeen = async () => {
+      if (!currentUserID || !groupID || messages.length === 0) return;
+
       const unreadMessages = messages.filter(
         (msg) =>
           msg.groupID === groupID &&
           !msg.seenStatus?.includes(currentUserID) &&
           !markedAsSeen.has(msg.messageID || "")
       );
-      console.log("GroupChat.tsx: Marking as seen:", unreadMessages.length, "messages");
-      unreadMessages.forEach((msg) => {
-        if (msg.messageID) {
-          socket.emit("seenGroupMessage", msg.messageID, currentUserID, groupID, (response: SocketResponse) => {
-            console.log("GroupChat.tsx: Seen response:", response);
-            if (response === "Đã cập nhật seenStatus chat nhóm") {
-              setMarkedAsSeen((prev) => new Set(prev).add(msg.messageID!));
-            }
-          });
+
+      const unreadMessagesToMark = unreadMessages.filter(
+        (msg) => !markedAsSeen.has(msg.messageID || "")
+      );
+
+      if (unreadMessagesToMark.length > 0) {
+        console.log("GroupChat.tsx: Marking as seen:", unreadMessagesToMark.length, "messages");
+        for (const msg of unreadMessagesToMark) {
+          if (msg.messageID) {
+            socket.emit("seenGroupMessage", msg.messageID, currentUserID, groupID, (response: SocketResponse) => {
+              console.log("GroupChat.tsx: Seen response:", response);
+              if (response === "Đã cập nhật seenStatus chat nhóm") {
+                setMarkedAsSeen((prev) => new Set(prev).add(msg.messageID!));
+                socket.emit("updateUnreadCount", { groupID, userID: currentUserID });
+              }
+            });
+          }
         }
-      });
-    }
-  }, [messages, currentUserID, groupID]);
+
+        // Lưu lastSeenTimestamp
+        await AsyncStorage.setItem(`lastSeen_${groupID}`, new Date().toISOString());
+      }
+    };
+
+    markMessagesAsSeen();
+  }, [currentUserID, groupID, messages]);
 
   const handleSendMessage = async () => {
     if (loading) {
       Alert.alert("Thông báo", "Đang tải dữ liệu, vui lòng đợi...");
       return;
     }
-  
+
     if (!inputText.trim() || !groupID || !currentUserID) {
       console.log("GroupChat.tsx: Invalid input:", { inputText, groupID, currentUserID });
       Alert.alert("Lỗi", "Không thể gửi tin nhắn: Thông tin không hợp lệ. Vui lòng đăng nhập lại.");
       return;
     }
-  
+
     const messageID = `${socket.id}-${Date.now()}`;
     const newMessage: Message = {
       senderID: currentUserID,
-      receiverID: null,
       groupID: groupID,
       messageTypeID: "type1",
       context: inputText,
@@ -801,62 +945,33 @@ export default function GroupChat() {
       createdAt: new Date().toISOString(),
       seenStatus: [],
       deleteStatusByUser: [],
-      recallStatus: false
+      recallStatus: false,
     };
-  
-    console.log("GroupChat.tsx: Sending message data:", newMessage);
-  
-    const sendMessageWithRetry = async (retryCount = 3, delay = 2000) => {
-      try {
-        const senderAvatar = await fetchUserAvatar(currentUserID);
-        setMessages((prev) => [...prev, { ...newMessage, senderAvatar }]);
-        setInputText("");
-        if (isAtBottom) {
-          scrollToBottom();
-        } else {
-          setShowScrollButton(true);
-        }
-  
-        return new Promise<void>((resolve, reject) => {
-          socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
-            console.log("GroupChat.tsx: Server response for sendMessage:", response);
-            if (response === "Đã nhận") {
-              resolve();
-            } else {
-              console.log("GroupChat.tsx: Failed to send message, response:", response);
-              reject(new Error(response));
-            }
-          });
-        });
-      } catch (error: any) {
-        if (retryCount > 0) {
-          console.log(`Retrying send message... Attempts left: ${retryCount}`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return sendMessageWithRetry(retryCount - 1, delay * 2);
-        }
-        throw error;
-      }
-    };
-  
+
     try {
-      await sendMessageWithRetry();
+      await sendMessage(
+        newMessage,
+        () => setInputText(""),
+        (error) => {
+          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+          Alert.alert(
+            "Lỗi",
+            `Không thể gửi tin nhắn: ${error.message}`,
+            [
+              { text: "Hủy", style: "cancel" },
+              {
+                text: "Thử lại",
+                onPress: () => {
+                  setInputText(newMessage.context);
+                  handleSendMessage();
+                },
+              },
+            ]
+          );
+        }
+      );
     } catch (error: any) {
       console.error("Lỗi khi gửi tin nhắn nhóm:", error.message);
-      setMessages((prev) => prev.filter(msg => msg.messageID !== messageID));
-      Alert.alert(
-        "Lỗi",
-        `Không thể gửi tin nhắn: ${error.message}`,
-        [
-          { text: "Hủy", style: "cancel" },
-          {
-            text: "Thử lại",
-            onPress: () => {
-              setInputText(newMessage.context);
-              handleSendMessage();
-            }
-          }
-        ]
-      );
     }
   };
 
@@ -870,7 +985,7 @@ export default function GroupChat() {
     const messageID = `${socket.id}-${Date.now()}`;
     const newMessage: Message = {
       senderID: currentUserID,
-      receiverID: null, // Thêm receiverID: undefined
+      receiverID: null,
       groupID: groupID as string,
       messageTypeID: "type4",
       context: stickerUrl,
@@ -882,25 +997,15 @@ export default function GroupChat() {
     };
 
     try {
-      socket.emit("sendMessage", newMessage, async (response: SocketResponse) => {
-        console.log("GroupChat.tsx: Server response for sendMessage:", response);
-        if (response === "Đã nhận") {
-          const senderAvatar = await fetchUserAvatar(currentUserID);
-          setMessages((prev) => [...prev, { ...newMessage, senderAvatar }]);
-          setShowStickerPicker(false);
-          if (isAtBottom) {
-            scrollToBottom();
-          } else {
-            setShowScrollButton(true);
-          }
-        } else {
-          console.log("GroupChat.tsx: Failed to send sticker, response:", response);
-          Alert.alert("Lỗi", "Không thể gửi sticker. Vui lòng thử lại.");
+      await sendMessage(
+        newMessage,
+        () => setShowStickerPicker(false),
+        (error) => {
+          Alert.alert("Lỗi", `Không thể gửi sticker: ${error.message}`);
         }
-      });
+      );
     } catch (error: any) {
       console.error("Lỗi khi gửi sticker:", error.message);
-      Alert.alert("Lỗi", "Không thể gửi sticker. Vui lòng thử lại.");
     }
   };
 
@@ -935,7 +1040,7 @@ export default function GroupChat() {
     const messageID = `${socket.id}-${Date.now()}`;
     const tempMessage: Message = {
       senderID: currentUserID,
-      receiverID: null, // Thêm receiverID: undefined
+      receiverID: null,
       groupID: groupID as string,
       messageTypeID: "type2",
       context: "Đang tải...",
@@ -945,14 +1050,6 @@ export default function GroupChat() {
       deleteStatusByUser: [],
       recallStatus: false,
     };
-
-    const senderAvatar = await fetchUserAvatar(currentUserID);
-    setMessages((prev) => [...prev, { ...tempMessage, senderAvatar }]);
-    if (isAtBottom) {
-      scrollToBottom();
-    } else {
-      setShowScrollButton(true);
-    }
 
     try {
       const fileBase64 = await convertFileToBase64(fileUri);
@@ -969,17 +1066,16 @@ export default function GroupChat() {
         file: { name: `image-${Date.now()}.jpg`, data: fileBase64 },
       };
 
-      socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
-        console.log("GroupChat.tsx: Server response for image:", response);
-        if (response !== "Đã nhận") {
+      await sendMessage(
+        newMessage,
+        undefined,
+        (error) => {
           setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-          Alert.alert("Lỗi", "Không thể gửi ảnh. Vui lòng thử lại.");
+          Alert.alert("Lỗi", `Không thể gửi ảnh: ${error.message}`);
         }
-      });
+      );
     } catch (error: any) {
       console.error("Lỗi khi gửi ảnh:", error.message);
-      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-      Alert.alert("Lỗi", "Không thể gửi ảnh. Vui lòng thử lại.");
     }
   };
 
@@ -1012,7 +1108,7 @@ export default function GroupChat() {
     const messageID = `${socket.id}-${Date.now()}`;
     const tempMessage: Message = {
       senderID: currentUserID,
-      receiverID: null, // Thêm receiverID: undefined
+      receiverID: null,
       groupID: groupID as string,
       messageTypeID: "type3",
       context: "Đang tải...",
@@ -1022,14 +1118,6 @@ export default function GroupChat() {
       deleteStatusByUser: [],
       recallStatus: false,
     };
-
-    const senderAvatar = await fetchUserAvatar(currentUserID);
-    setMessages((prev) => [...prev, { ...tempMessage, senderAvatar }]);
-    if (isAtBottom) {
-      scrollToBottom();
-    } else {
-      setShowScrollButton(true);
-    }
 
     try {
       const fileBase64 = await convertFileToBase64(fileUri);
@@ -1046,17 +1134,16 @@ export default function GroupChat() {
         file: { name: `video-${Date.now()}.mp4`, data: fileBase64 },
       };
 
-      socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
-        console.log("GroupChat.tsx: Server response for video:", response);
-        if (response !== "Đã nhận") {
+      await sendMessage(
+        newMessage,
+        undefined,
+        (error) => {
           setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-          Alert.alert("Lỗi", "Không thể gửi video. Vui lòng thử lại.");
+          Alert.alert("Lỗi", `Không thể gửi video: ${error.message}`);
         }
-      });
+      );
     } catch (error: any) {
       console.error("Lỗi khi gửi video:", error.message);
-      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-      Alert.alert("Lỗi", "Không thể gửi video. Vui lòng thử lại.");
     }
   };
 
@@ -1072,7 +1159,7 @@ export default function GroupChat() {
     const messageID = `${socket.id}-${Date.now()}`;
     const tempMessage: Message = {
       senderID: currentUserID,
-      receiverID: null, // Thêm receiverID: undefined
+      receiverID: null,
       groupID: groupID as string,
       messageTypeID: "type5",
       context: "Đang tải...",
@@ -1082,14 +1169,6 @@ export default function GroupChat() {
       deleteStatusByUser: [],
       recallStatus: false,
     };
-
-    const senderAvatar = await fetchUserAvatar(currentUserID);
-    setMessages((prev) => [...prev, { ...tempMessage, senderAvatar }]);
-    if (isAtBottom) {
-      scrollToBottom();
-    } else {
-      setShowScrollButton(true);
-    }
 
     try {
       const fileBase64 = await convertFileToBase64(fileUri);
@@ -1106,17 +1185,16 @@ export default function GroupChat() {
         file: { name: fileName, data: fileBase64 },
       };
 
-      socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
-        console.log("GroupChat.tsx: Server response for file:", response);
-        if (response !== "Đã nhận") {
+      await sendMessage(
+        newMessage,
+        undefined,
+        (error) => {
           setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-          Alert.alert("Lỗi", "Không thể gửi file. Vui lòng thử lại.");
+          Alert.alert("Lỗi", `Không thể gửi file: ${error.message}`);
         }
-      });
+      );
     } catch (error: any) {
       console.error("Lỗi khi gửi file:", error.message);
-      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-      Alert.alert("Lỗi", "Không thể gửi file. Vui lòng thử lại.");
     }
   };
 
@@ -1193,7 +1271,7 @@ export default function GroupChat() {
       messageID = `${socket.id}-${Date.now()}`;
       const tempMessage: Message = {
         senderID: currentUserID,
-        receiverID: null, // Thêm receiverID: undefined
+        receiverID: null,
         groupID: groupID as string,
         messageTypeID: "type6",
         context: "Đang tải...",
@@ -1203,14 +1281,6 @@ export default function GroupChat() {
         deleteStatusByUser: [],
         recallStatus: false,
       };
-
-      const senderAvatar = await fetchUserAvatar(currentUserID);
-      setMessages((prev) => [...prev, { ...tempMessage, senderAvatar }]);
-      if (isAtBottom) {
-        scrollToBottom();
-      } else {
-        setShowScrollButton(true);
-      }
 
       const fileBase64 = await convertFileToBase64(uri);
       const newMessage: Message = {
@@ -1226,17 +1296,16 @@ export default function GroupChat() {
         file: { name: `voice-${Date.now()}.m4a`, data: fileBase64 },
       };
 
-      socket.emit("sendMessage", newMessage, (response: SocketResponse) => {
-        console.log("GroupChat.tsx: Server response for voice:", response);
-        if (response !== "Đã nhận") {
+      await sendMessage(
+        newMessage,
+        undefined,
+        (error) => {
           setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-          Alert.alert("Lỗi", "Không thể gửi tin nhắn thoại. Vui lòng thử lại.");
+          Alert.alert("Lỗi", `Không thể gửi tin nhắn thoại: ${error.message}`);
         }
-      });
+      );
     } catch (error: any) {
       console.error("Lỗi khi gửi tin nhắn thoại:", error.message);
-      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-      Alert.alert("Lỗi", "Không thể gửi tin nhắn thoại. Vui lòng thử lại.");
     } finally {
       setRecording(null);
       setIsRecording(false);
@@ -1505,7 +1574,7 @@ export default function GroupChat() {
         <FlatList
           ref={flatListRef}
           data={messages}
-          keyExtractor={(item) => item.messageID || item.createdAt || `message-${Math.random().toString()}`}
+          keyExtractor={(item, index) => item.messageID ?? `${item.createdAt}-${index}`}
           renderItem={renderItem}
           contentContainerStyle={{
             padding: 10,
@@ -1606,436 +1675,429 @@ export default function GroupChat() {
       </Modal>
 
       <Modal
-        visible={showForwardModal}
-        animationType="fade"
-        transparent={true}
-        onRequestClose={() => setShowForwardModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.forwardModalContent}>
-            <Text style={styles.modalTitle}>Chuyển tiếp đến</Text>
-            <FlatList
-              data={[
-                ...contacts.map((c) => ({ type: "contact" as const, data: c })),
-                ...groups.map((g) => ({ type: "group" as const, data: g })),
-              ].slice(0, 50)}
-              keyExtractor={(item: ForwardItem) =>
-                item.type === "contact" ? `contact-${item.data.userID}` : `group-${item.data.groupID}`
-              }
-              renderItem={({ item }: { item: ForwardItem }) => {
-                const id = item.type === "contact" ? item.data.userID : item.data.groupID;
-                const isSelected = selectedForwardItems.includes(id);
-                return (
-                  <Pressable
-                    style={styles.forwardItem}
-                    onPress={() => handleSelectForwardItem(id)}
+            visible={showForwardModal}
+            animationType="fade"
+            transparent={true}
+            onRequestClose={() => setShowForwardModal(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.forwardModalContent}>
+                <Text style={styles.modalTitle}>Chuyển tiếp đến</Text>
+                <FlatList
+                  data={[
+                    ...contacts.map((c) => ({ type: "contact" as const, data: c })),
+                    ...groups.map((g) => ({ type: "group" as const, data: g })),
+                  ].slice(0, 50)}
+                  keyExtractor={(item: ForwardItem) =>
+                    item.type === "contact" ? `contact-${item.data.userID}` : `group-${item.data.groupID}`
+                  }
+                  renderItem={({ item }: { item: ForwardItem }) => {
+                    const id = item.type === "contact" ? item.data.userID : item.data.groupID;
+                    const isSelected = selectedForwardItems.includes(id);
+                    return (
+                      <Pressable
+                        style={styles.forwardItem}
+                        onPress={() => handleSelectForwardItem(id)}
+                      >
+                        <Ionicons
+                          name={isSelected ? "checkbox-outline" : "square-outline"}
+                          size={24}
+                          color={isSelected ? "#007AFF" : "#666"}
+                          style={{ marginRight: 10 }}
+                        />
+                        {item.type === "contact" && item.data.avatar ? (
+                          <Image
+                            source={{ uri: item.data.avatar }}
+                            style={styles.forwardAvatar}
+                          />
+                        ) : (
+                          <View style={styles.forwardAvatarPlaceholder} />
+                        )}
+                        <Text style={styles.forwardItemText}>
+                          {item.type === "contact" ? item.data.username : item.data.groupName}
+                          {item.type === "contact" && item.data.userID === currentUserID ? " (Bạn)" : ""}
+                        </Text>
+                      </Pressable>
+                    );
+                  }}
+                  style={{ maxHeight: "60%" }}
+                />
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, { backgroundColor: "#FF3B30" }]}
+                    onPress={() => setShowForwardModal(false)}
                   >
-                    <Ionicons
-                      name={isSelected ? "checkbox-outline" : "square-outline"}
-                      size={24}
-                      color={isSelected ? "#007AFF" : "#666"}
-                      style={{ marginRight: 10 }}
-                    />
-                    {item.type === "contact" && item.data.avatar ? (
-                      <Image
-                        source={{ uri: item.data.avatar }}
-                        style={styles.forwardAvatar}
-                      />
-                    ) : (
-                      <View style={styles.forwardAvatarPlaceholder} />
-                    )}
-                    <Text style={styles.forwardItemText}>
-                      {item.type === "contact" ? item.data.username : item.data.groupName}
-                      {item.type === "contact" && item.data.userID === currentUserID ? " (Bạn)" : ""}
-                    </Text>
-                  </Pressable>
-                );
-              }}
-              style={{ maxHeight: "60%" }}
-            />
-            <View style={styles.forwardButtonContainer}>
-              <Pressable
-                style={[styles.closeButton, { backgroundColor: "#FF3B30" }]}
-                onPress={() => setShowForwardModal(false)}
-              >
-                <Text style={styles.closeButtonText}>Hủy</Text>
-              </Pressable>
-              <Pressable
-                style={styles.closeButton}
-                onPress={handleShareMessages}
-              >
-                <Text style={styles.closeButtonText}>Chuyển</Text>
-              </Pressable>
+                    <Text style={styles.modalButtonText}>Hủy</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButton, { backgroundColor: "#007AFF" }]}
+                    onPress={handleShareMessages}
+                  >
+                    <Text style={styles.modalButtonText}>Gửi</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
-          </View>
+          </Modal>
         </View>
-      </Modal>
-    </View>
-  );
-}
+      );
+    };
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5F5F5" },
-  navbar: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#007AFF",
-    paddingHorizontal: 15,
-    zIndex: 1000,
-    ...Platform.select({
-      android: {
-        elevation: 4,
+    const styles = StyleSheet.create({
+      container: {
+        flex: 1,
+        backgroundColor: "#fff",
       },
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 3.84,
+      navbar: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#007AFF",
+        paddingHorizontal: 10,
       },
-    }),
-  },
-  groupNameContainer: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    marginLeft: 10,
-  },
-  groupAvatarContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    position: "relative",
-  },
-  avatarWrapper: {
-    width: 60,
-    height: 60,
-    position: "relative",
-  },
-  avatarRow: {
-    flexDirection: "row",
-    justifyContent: "flex-start",
-  },
-  groupAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 2,
-    borderColor: "#fff",
-  },
-  membersCountBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#ddd",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  membersCountText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "bold",
-  },
-  groupInfo: {
-    marginLeft: 10,
-    justifyContent: "center",
-  },
-  groupName: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  groupDetails: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 2,
-  },
-  groupDetailIcon: {
-    marginRight: 5,
-  },
-  groupDetailText: {
-    color: "#fff",
-    fontSize: 14,
-  },
-  icon: {
-    marginHorizontal: 10,
-  },
-  messageContainer: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    marginVertical: 5,
-    paddingHorizontal: 10,
-  },
-  myMessage: {
-    justifyContent: "flex-end",
-    alignSelf: "flex-end",
-  },
-  otherMessage: {
-    justifyContent: "flex-start",
-    alignSelf: "flex-start",
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 10,
-  },
-  avatarPlaceholder: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#ddd",
-    marginRight: 10,
-  },
-  messageBoxWrapper: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  messageBox: {
-    backgroundColor: "#fff",
-    padding: 10,
-    borderRadius: 10,
-    maxWidth: "80%",
-  },
-  messageText: {
-    fontSize: 16,
-  },
-  loadingText: {
-    fontSize: 16,
-    color: "#666",
-    fontStyle: "italic",
-  },
-  seenText: {
-    fontSize: 12,
-    color: "#666",
-    textAlign: "right",
-  },
-  recalledMessage: {
-    fontStyle: "italic",
-    color: "#666",
-  },
-  forwardedLabel: {
-    fontSize: 12,
-    color: "#666",
-    fontStyle: "italic",
-  },
-  sticker: {
-    width: 100,
-    height: 100,
-    marginVertical: 5,
-  },
-  image: {
-    width: 200,
-    height: 200,
-    borderRadius: 10,
-    marginVertical: 5,
-  },
-  videoContainer: {
-    width: 200,
-    height: 200,
-    borderRadius: 10,
-    marginVertical: 5,
-  },
-  video: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 10,
-  },
-  fileContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginVertical: 5,
-  },
-  fileText: {
-    fontSize: 16,
-    color: "#007AFF",
-    marginLeft: 10,
-  },
-  voiceContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginVertical: 5,
-  },
-  voiceText: {
-    fontSize: 16,
-    color: "#007AFF",
-    marginLeft: 10,
-  },
-  errorText: {
-    fontSize: 14,
-    color: "red",
-    fontStyle: "italic",
-  },
-  optionsButton: {
-    padding: 10,
-    marginHorizontal: 5,
-  },
-  inputContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    borderTopWidth: 1,
-    borderTopColor: "#ddd",
-  },
-  input: {
-    flex: 1,
-    fontSize: 16,
-    marginHorizontal: 10,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  forwardModalContent: {
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    padding: 20,
-    width: "90%",
-    maxHeight: "80%",
-    alignItems: "center",
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 20,
-  },
-  forwardItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: "#ddd",
-    width: "100%",
-  },
-  forwardAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 10,
-  },
-  forwardAvatarPlaceholder: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#ddd",
-    marginRight: 10,
-  },
-  forwardItemText: {
-    fontSize: 16,
-    flex: 1,
-  },
-  forwardButtonContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
-    marginTop: 10,
-  },
-  messageOptionsContainer: {
-    backgroundColor: "white",
-    borderRadius: 10,
-    padding: 20,
-    width: "80%",
-    maxWidth: 300,
-  },
-  optionButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-  },
-  optionText: {
-    fontSize: 16,
-    marginLeft: 10,
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-end",
-  },
-  stickerPicker: {
-    backgroundColor: "#fff",
-    height: "50%",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-  },
-  stickerSearchInput: {
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 10,
-  },
-  stickerThumbnail: {
-    width: 80,
-    height: 80,
-    margin: 5,
-  },
-  closeButton: {
-    backgroundColor: "#007AFF",
-    padding: 10,
-    borderRadius: 10,
-    alignItems: "center",
-    width: "45%",
-  },
-  closeButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  pinnedMessageContainer: {
-    backgroundColor: "#e5e5ea",
-    padding: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#ddd",
-    zIndex: 999,
-  },
-  pinnedMessageLabel: {
-    fontSize: 12,
-    color: "#666",
-    fontWeight: "bold",
-  },
-  pinnedMessageText: {
-    fontSize: 14,
-    color: "#000",
-    marginVertical: 5,
-  },
-  unpinButton: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  unpinButtonText: {
-    fontSize: 12,
-    color: "#007AFF",
-    marginLeft: 5,
-  },
-  chatContainer: {
-    flex: 1,
-    position: "relative",
-  },
-  scrollButton: {
-    position: "absolute",
-    right: 16,
-    bottom: 16,
-    zIndex: 1000,
-  },
-  scrollButtonInner: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#007AFF",
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-});
+      groupNameContainer: {
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        marginLeft: 10,
+      },
+      groupAvatarContainer: {
+        flexDirection: "column",
+        alignItems: "center",
+      },
+      avatarWrapper: {
+        flexDirection: "column",
+      },
+      avatarRow: {
+        flexDirection: "row",
+      },
+      groupAvatar: {
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        borderWidth: 1,
+        borderColor: "#fff",
+      },
+      membersCountBadge: {
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        backgroundColor: "#fff",
+        justifyContent: "center",
+        alignItems: "center",
+        borderWidth: 1,
+        borderColor: "#007AFF",
+      },
+      membersCountText: {
+        color: "#007AFF",
+        fontSize: 12,
+        fontWeight: "bold",
+      },
+      groupInfo: {
+        marginLeft: 10,
+      },
+      groupName: {
+        color: "#fff",
+        fontSize: 18,
+        fontWeight: "bold",
+      },
+      groupDetails: {
+        flexDirection: "row",
+        alignItems: "center",
+      },
+      groupDetailIcon: {
+        marginRight: 5,
+      },
+      groupDetailText: {
+        color: "#fff",
+        fontSize: 14,
+      },
+      icon: {
+        marginHorizontal: 10,
+      },
+      chatContainer: {
+        flex: 1,
+      },
+      messageContainer: {
+        flexDirection: "row",
+        marginVertical: 5,
+        alignItems: "flex-end",
+      },
+      myMessage: {
+        justifyContent: "flex-end",
+      },
+      otherMessage: {
+        justifyContent: "flex-start",
+      },
+      avatar: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        marginRight: 10,
+      },
+      avatarPlaceholder: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: "#ccc",
+        marginRight: 10,
+      },
+      messageBoxWrapper: {
+        flexDirection: "row",
+        alignItems: "flex-end",
+        maxWidth: "80%",
+      },
+      messageBox: {
+        backgroundColor: "#E5E5EA",
+        borderRadius: 15,
+        padding: 10,
+      },
+      messageText: {
+        fontSize: 16,
+        color: "#000",
+      },
+      seenText: {
+        fontSize: 12,
+        color: "#666",
+        marginTop: 5,
+        textAlign: "right",
+      },
+      image: {
+        width: 200,
+        height: 200,
+        borderRadius: 10,
+      },
+      videoContainer: {
+        width: 200,
+        height: 200,
+        borderRadius: 10,
+        overflow: "hidden",
+      },
+      video: {
+        width: "100%",
+        height: "100%",
+      },
+      sticker: {
+        width: 100,
+        height: 100,
+      },
+      fileContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+      },
+      fileText: {
+        marginLeft: 10,
+        fontSize: 16,
+        color: "#007AFF",
+      },
+      voiceContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+      },
+      voiceText: {
+        marginLeft: 10,
+        fontSize: 16,
+        color: "#007AFF",
+      },
+      recalledMessage: {
+        fontSize: 14,
+        color: "#666",
+        fontStyle: "italic",
+      },
+      forwardedLabel: {
+        fontSize: 12,
+        color: "#666",
+        fontStyle: "italic",
+        marginBottom: 5,
+      },
+      loadingText: {
+        fontSize: 14,
+        color: "#666",
+        fontStyle: "italic",
+      },
+      errorText: {
+        fontSize: 14,
+        color: "red",
+        fontStyle: "italic",
+      },
+      optionsButton: {
+        padding: 5,
+        marginLeft: 5,
+      },
+      modalOverlay: {
+        flex: 1,
+        backgroundColor: "rgba(0,0,0,0.5)",
+        justifyContent: "center",
+        alignItems: "center",
+      },
+      messageOptionsContainer: {
+        backgroundColor: "#fff",
+        borderRadius: 10,
+        padding: 10,
+        width: "80%",
+      },
+      optionButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: "#E5E5EA",
+      },
+      optionText: {
+        marginLeft: 10,
+        fontSize: 16,
+        color: "#000",
+      },
+      inputContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        backgroundColor: "#F5F5F5",
+      },
+      input: {
+        flex: 1,
+        backgroundColor: "#fff",
+        borderRadius: 20,
+        paddingHorizontal: 15,
+        paddingVertical: 10,
+        marginHorizontal: 10,
+      },
+      modalContainer: {
+        flex: 1,
+        backgroundColor: "rgba(0,0,0,0.5)",
+        justifyContent: "flex-end",
+      },
+      stickerPicker: {
+        backgroundColor: "#fff",
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        padding: 20,
+        maxHeight: "50%",
+      },
+      stickerSearchInput: {
+        borderWidth: 1,
+        borderColor: "#E5E5EA",
+        borderRadius: 10,
+        padding: 10,
+        marginBottom: 10,
+      },
+      stickerThumbnail: {
+        width: 100,
+        height: 100,
+        margin: 5,
+      },
+      closeButton: {
+        marginTop: 10,
+        backgroundColor: "#007AFF",
+        borderRadius: 10,
+        padding: 10,
+        alignItems: "center",
+      },
+      closeButtonText: {
+        color: "#fff",
+        fontSize: 16,
+      },
+      forwardModalContent: {
+        backgroundColor: "#fff",
+        borderRadius: 10,
+        padding: 20,
+        width: "90%",
+        maxHeight: "80%",
+      },
+      modalTitle: {
+        fontSize: 18,
+        fontWeight: "bold",
+        marginBottom: 10,
+      },
+      forwardItem: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: "#E5E5EA",
+      },
+      forwardAvatar: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        marginRight: 10,
+      },
+      forwardAvatarPlaceholder: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: "#ccc",
+        marginRight: 10,
+      },
+      forwardItemText: {
+        fontSize: 16,
+        color: "#000",
+      },
+      modalButtons: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        marginTop: 20,
+      },
+      modalButton: {
+        flex: 1,
+        padding: 10,
+        borderRadius: 10,
+        alignItems: "center",
+        marginHorizontal: 5,
+      },
+      modalButtonText: {
+        color: "#fff",
+        fontSize: 16,
+      },
+      pinnedMessageContainer: {
+        backgroundColor: "#E5E5EA",
+        padding: 10,
+        marginHorizontal: 10,
+        marginTop: 10,
+        borderRadius: 10,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+      },
+      pinnedMessageLabel: {
+        fontSize: 14,
+        fontWeight: "bold",
+        color: "#007AFF",
+      },
+      pinnedMessageText: {
+        fontSize: 14,
+        color: "#000",
+        flex: 1,
+        marginHorizontal: 10,
+      },
+      unpinButton: {
+        flexDirection: "row",
+        alignItems: "center",
+      },
+      unpinButtonText: {
+        fontSize: 14,
+        color: "#007AFF",
+        marginLeft: 5,
+      },
+      loadingContainer: {
+        flex: 1,
+        justifyContent: "center",
+        alignItems: "center",
+      },
+      scrollButton: {
+        position: "absolute",
+        bottom: 80,
+        right: 20,
+        backgroundColor: "rgba(0, 0, 0, 0.5)",
+        borderRadius: 25,
+        padding: 5,
+      },
+      scrollButtonInner: {
+        backgroundColor: "#007AFF",
+        borderRadius: 20,
+        width: 40,
+        height: 40,
+        justifyContent: "center",
+        alignItems: "center",
+      },
+    });

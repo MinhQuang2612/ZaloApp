@@ -46,7 +46,7 @@ export const fetchMessages = async (receiverID: string, isGroup: boolean = false
       response = await api.get(`/api/message/group/${receiverID}`);
     } else {
       if (!receiverID) throw new Error("Thiếu receiverID.");
-      response = await api.get(`/api/message/${userID1}/${receiverID}`);
+      response = await api.get(`/api/message/single/${userID1}/${receiverID}`);
     }
 
     // Ánh xạ dữ liệu từ API (content -> context, đảm bảo đầy đủ các trường)
