@@ -22,13 +22,20 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fetchMessages, Message } from "../services/message";
 import { fetchUserGroups, fetchGroupMembers, GroupMember, Group } from "../services/group";
 import { fetchContacts, Contact } from "../services/contacts";
-import socket, { connectSocket, deleteMessage, recallMessage, registerSocketListeners, removeSocketListeners, joinGroup } from "../services/socket";
+import { connectSocket, deleteMessage, recallMessage, registerSocketListeners, removeSocketListeners, joinGroup } from "../services/socket";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import { Audio, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import api from "../services/api";
+
+// Đảm bảo socket được import và khởi tạo đúng
+import { io } from "socket.io-client";
+const socket = io(process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000", {
+  autoConnect: false,
+  transports: ["websocket"],
+});
 
 type SocketResponse =
   | "đang gửi"
@@ -204,8 +211,9 @@ const MessageItem = ({
   const isRecalled = item.recallStatus;
 
   const statusText = () => {
-    if (item.seenStatus?.length && item.seenStatus.length > 1) {
-      return `Đã xem (${item.seenStatus.length - 1})`;
+    const othersSeen = item.seenStatus?.filter((id) => id !== currentUserID) || [];
+    if (othersSeen.length > 0) {
+      return `Đã xem (${othersSeen.length})`;
     }
     if (item.isDelivered) {
       return "Đã nhận";
@@ -379,7 +387,6 @@ export default function GroupChat() {
   const insets = useSafeAreaInsets();
   const GIPHY_API_KEY = "ahUloRbYoMUhR2aBUDO2iyNObLH8dnMa";
 
-  // Cache cho avatar
   const avatarCache = useRef<Map<string, string>>(new Map()).current;
 
   const getUploadsPath = (): string => {
@@ -672,27 +679,26 @@ export default function GroupChat() {
     const handleReceiveMessage = async (message: GroupMessage) => {
       console.log("GroupChat.tsx: Received message:", message);
       if (message.groupID === groupID) {
+        const messageExists = messages.some((m) => m.messageID === message.messageID);
+        if (messageExists) {
+          console.log("GroupChat.tsx: Message already exists, skipping:", message.messageID);
+          return;
+        }
+
+        if (
+          message.messageTypeID === "type2" ||
+          message.messageTypeID === "type3" ||
+          message.messageTypeID === "type5" ||
+          message.messageTypeID === "type6"
+        ) {
+          message.context = convertFilePathToURL(message.context);
+        }
+
+        const senderAvatar = await fetchUserAvatar(message.senderID);
+        const newMessage = { ...message, senderAvatar, isDelivered: true };
+
         setMessages((prev) => {
-          const messageExists = prev.some((m) => m.messageID === message.messageID);
-          if (messageExists) {
-            console.log("GroupChat.tsx: Message already exists, updating:", message.messageID);
-            return prev.map((m) =>
-              m.messageID === message.messageID
-                ? { ...m, ...message, isDelivered: m.isDelivered ?? true }
-                : m
-            );
-          }
-
-          if (
-            message.messageTypeID === "type2" ||
-            message.messageTypeID === "type3" ||
-            message.messageTypeID === "type5" ||
-            message.messageTypeID === "type6"
-          ) {
-            message.context = convertFilePathToURL(message.context);
-          }
-
-          const updatedMessages = [...prev, { ...message, isDelivered: true }];
+          const updatedMessages = [...prev, newMessage];
           if (isAtBottom) {
             scrollToBottom();
           } else {
@@ -700,6 +706,8 @@ export default function GroupChat() {
           }
           return updatedMessages;
         });
+
+        await AsyncStorage.setItem(`groupMessages_${groupID}`, JSON.stringify([...messages, newMessage]));
 
         socket.emit("updateUnreadCount", { groupID, userID: currentUserID });
       }
@@ -713,7 +721,7 @@ export default function GroupChat() {
             msg.messageID === data.messageID
               ? {
                   ...msg,
-                  seenStatus: [...(msg.seenStatus || []), data.userID],
+                  seenStatus: [...new Set([...(msg.seenStatus || []), data.userID])],
                 }
               : msg
           )
@@ -739,18 +747,13 @@ export default function GroupChat() {
 
     const handleRecalledMessage = (data: { messageID: string; userID: string }) => {
       console.log("GroupChat.tsx: Message recalled:", data);
-      if (data.userID !== currentUserID) {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.messageID === data.messageID
-              ? {
-                  ...msg,
-                  recallStatus: true,
-                }
-              : msg
-          )
-        );
-      }
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.messageID === data.messageID
+            ? { ...msg, recallStatus: true }
+            : msg
+        )
+      );
     };
 
     socket.on("receiveMessage", handleReceiveMessage);
@@ -884,7 +887,7 @@ export default function GroupChat() {
         if (cleanup) cleanup();
       };
     }
-  }, [socket, groupID, currentUserID]);
+  }, [socket, groupID, currentUserID, messages, isAtBottom]); // Thêm messages và isAtBottom vào dependencies
 
   useEffect(() => {
     const markMessagesAsSeen = async () => {
@@ -915,7 +918,6 @@ export default function GroupChat() {
           }
         }
 
-        // Lưu lastSeenTimestamp
         await AsyncStorage.setItem(`lastSeen_${groupID}`, new Date().toISOString());
       }
     };
@@ -1325,17 +1327,17 @@ export default function GroupChat() {
       );
       await saveMessageStatus(messageID, "deleted");
       await deleteMessage(messageID, currentUserID);
+      const updatedMessages = messages.map((msg) =>
+        msg.messageID === messageID
+          ? { ...msg, deleteStatusByUser: [...(msg.deleteStatusByUser || []), currentUserID] }
+          : msg
+      );
+      await AsyncStorage.setItem(`groupMessages_${groupID}`, JSON.stringify(updatedMessages));
       Alert.alert("Thành công", "Đã xóa tin nhắn");
     } catch (error) {
       console.error("Lỗi khi xóa tin nhắn:", error);
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.messageID === messageID
-            ? { ...msg, deleteStatusByUser: (msg.deleteStatusByUser || []).filter((id) => id !== currentUserID) }
-            : msg
-        )
-      );
       Alert.alert("Lỗi", "Không thể xóa tin nhắn. Vui lòng thử lại.");
+      await loadMessagesWithCache(groupID as string);
     }
   };
 
@@ -1343,9 +1345,17 @@ export default function GroupChat() {
     if (!currentUserID || !messageID) return;
 
     try {
-      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.messageID === messageID ? { ...msg, recallStatus: true } : msg
+        )
+      );
       await removeMessageStatus(messageID);
       await recallMessage(messageID, currentUserID);
+      const updatedMessages = messages.map((msg) =>
+        msg.messageID === messageID ? { ...msg, recallStatus: true } : msg
+      );
+      await AsyncStorage.setItem(`groupMessages_${groupID}`, JSON.stringify(updatedMessages));
       Alert.alert("Thành công", "Đã thu hồi tin nhắn");
     } catch (error) {
       console.error("Lỗi khi thu hồi tin nhắn:", error);
@@ -1675,429 +1685,429 @@ export default function GroupChat() {
       </Modal>
 
       <Modal
-            visible={showForwardModal}
-            animationType="fade"
-            transparent={true}
-            onRequestClose={() => setShowForwardModal(false)}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.forwardModalContent}>
-                <Text style={styles.modalTitle}>Chuyển tiếp đến</Text>
-                <FlatList
-                  data={[
-                    ...contacts.map((c) => ({ type: "contact" as const, data: c })),
-                    ...groups.map((g) => ({ type: "group" as const, data: g })),
-                  ].slice(0, 50)}
-                  keyExtractor={(item: ForwardItem) =>
-                    item.type === "contact" ? `contact-${item.data.userID}` : `group-${item.data.groupID}`
-                  }
-                  renderItem={({ item }: { item: ForwardItem }) => {
-                    const id = item.type === "contact" ? item.data.userID : item.data.groupID;
-                    const isSelected = selectedForwardItems.includes(id);
-                    return (
-                      <Pressable
-                        style={styles.forwardItem}
-                        onPress={() => handleSelectForwardItem(id)}
-                      >
-                        <Ionicons
-                          name={isSelected ? "checkbox-outline" : "square-outline"}
-                          size={24}
-                          color={isSelected ? "#007AFF" : "#666"}
-                          style={{ marginRight: 10 }}
-                        />
-                        {item.type === "contact" && item.data.avatar ? (
-                          <Image
-                            source={{ uri: item.data.avatar }}
-                            style={styles.forwardAvatar}
-                          />
-                        ) : (
-                          <View style={styles.forwardAvatarPlaceholder} />
-                        )}
-                        <Text style={styles.forwardItemText}>
-                          {item.type === "contact" ? item.data.username : item.data.groupName}
-                          {item.type === "contact" && item.data.userID === currentUserID ? " (Bạn)" : ""}
-                        </Text>
-                      </Pressable>
-                    );
-                  }}
-                  style={{ maxHeight: "60%" }}
-                />
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity
-                    style={[styles.modalButton, { backgroundColor: "#FF3B30" }]}
-                    onPress={() => setShowForwardModal(false)}
+        visible={showForwardModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowForwardModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.forwardModalContent}>
+            <Text style={styles.modalTitle}>Chuyển tiếp đến</Text>
+            <FlatList
+              data={[
+                ...contacts.map((c) => ({ type: "contact" as const, data: c })),
+                ...groups.map((g) => ({ type: "group" as const, data: g })),
+              ].slice(0, 50)}
+              keyExtractor={(item: ForwardItem) =>
+                item.type === "contact" ? `contact-${item.data.userID}` : `group-${item.data.groupID}`
+              }
+              renderItem={({ item }: { item: ForwardItem }) => {
+                const id = item.type === "contact" ? item.data.userID : item.data.groupID;
+                const isSelected = selectedForwardItems.includes(id);
+                return (
+                  <Pressable
+                    style={styles.forwardItem}
+                    onPress={() => handleSelectForwardItem(id)}
                   >
-                    <Text style={styles.modalButtonText}>Hủy</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalButton, { backgroundColor: "#007AFF" }]}
-                    onPress={handleShareMessages}
-                  >
-                    <Text style={styles.modalButtonText}>Gửi</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
+                    <Ionicons
+                      name={isSelected ? "checkbox-outline" : "square-outline"}
+                      size={24}
+                      color={isSelected ? "#007AFF" : "#666"}
+                      style={{ marginRight: 10 }}
+                    />
+                    {item.type === "contact" && item.data.avatar ? (
+                      <Image
+                        source={{ uri: item.data.avatar }}
+                        style={styles.forwardAvatar}
+                      />
+                    ) : (
+                      <View style={styles.forwardAvatarPlaceholder} />
+                    )}
+                    <Text style={styles.forwardItemText}>
+                      {item.type === "contact" ? item.data.username : item.data.groupName}
+                      {item.type === "contact" && item.data.userID === currentUserID ? " (Bạn)" : ""}
+                    </Text>
+                  </Pressable>
+                );
+              }}
+              style={{ maxHeight: "60%" }}
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: "#FF3B30" }]}
+                onPress={() => setShowForwardModal(false)}
+              >
+                <Text style={styles.modalButtonText}>Hủy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: "#007AFF" }]}
+                onPress={handleShareMessages}
+              >
+                <Text style={styles.modalButtonText}>Gửi</Text>
+              </TouchableOpacity>
             </View>
-          </Modal>
+          </View>
         </View>
-      );
-    };
+      </Modal>
+    </View>
+  );
+};
 
-    const styles = StyleSheet.create({
-      container: {
-        flex: 1,
-        backgroundColor: "#fff",
-      },
-      navbar: {
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: "#007AFF",
-        paddingHorizontal: 10,
-      },
-      groupNameContainer: {
-        flex: 1,
-        flexDirection: "row",
-        alignItems: "center",
-        marginLeft: 10,
-      },
-      groupAvatarContainer: {
-        flexDirection: "column",
-        alignItems: "center",
-      },
-      avatarWrapper: {
-        flexDirection: "column",
-      },
-      avatarRow: {
-        flexDirection: "row",
-      },
-      groupAvatar: {
-        width: 30,
-        height: 30,
-        borderRadius: 15,
-        borderWidth: 1,
-        borderColor: "#fff",
-      },
-      membersCountBadge: {
-        width: 30,
-        height: 30,
-        borderRadius: 15,
-        backgroundColor: "#fff",
-        justifyContent: "center",
-        alignItems: "center",
-        borderWidth: 1,
-        borderColor: "#007AFF",
-      },
-      membersCountText: {
-        color: "#007AFF",
-        fontSize: 12,
-        fontWeight: "bold",
-      },
-      groupInfo: {
-        marginLeft: 10,
-      },
-      groupName: {
-        color: "#fff",
-        fontSize: 18,
-        fontWeight: "bold",
-      },
-      groupDetails: {
-        flexDirection: "row",
-        alignItems: "center",
-      },
-      groupDetailIcon: {
-        marginRight: 5,
-      },
-      groupDetailText: {
-        color: "#fff",
-        fontSize: 14,
-      },
-      icon: {
-        marginHorizontal: 10,
-      },
-      chatContainer: {
-        flex: 1,
-      },
-      messageContainer: {
-        flexDirection: "row",
-        marginVertical: 5,
-        alignItems: "flex-end",
-      },
-      myMessage: {
-        justifyContent: "flex-end",
-      },
-      otherMessage: {
-        justifyContent: "flex-start",
-      },
-      avatar: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        marginRight: 10,
-      },
-      avatarPlaceholder: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: "#ccc",
-        marginRight: 10,
-      },
-      messageBoxWrapper: {
-        flexDirection: "row",
-        alignItems: "flex-end",
-        maxWidth: "80%",
-      },
-      messageBox: {
-        backgroundColor: "#E5E5EA",
-        borderRadius: 15,
-        padding: 10,
-      },
-      messageText: {
-        fontSize: 16,
-        color: "#000",
-      },
-      seenText: {
-        fontSize: 12,
-        color: "#666",
-        marginTop: 5,
-        textAlign: "right",
-      },
-      image: {
-        width: 200,
-        height: 200,
-        borderRadius: 10,
-      },
-      videoContainer: {
-        width: 200,
-        height: 200,
-        borderRadius: 10,
-        overflow: "hidden",
-      },
-      video: {
-        width: "100%",
-        height: "100%",
-      },
-      sticker: {
-        width: 100,
-        height: 100,
-      },
-      fileContainer: {
-        flexDirection: "row",
-        alignItems: "center",
-      },
-      fileText: {
-        marginLeft: 10,
-        fontSize: 16,
-        color: "#007AFF",
-      },
-      voiceContainer: {
-        flexDirection: "row",
-        alignItems: "center",
-      },
-      voiceText: {
-        marginLeft: 10,
-        fontSize: 16,
-        color: "#007AFF",
-      },
-      recalledMessage: {
-        fontSize: 14,
-        color: "#666",
-        fontStyle: "italic",
-      },
-      forwardedLabel: {
-        fontSize: 12,
-        color: "#666",
-        fontStyle: "italic",
-        marginBottom: 5,
-      },
-      loadingText: {
-        fontSize: 14,
-        color: "#666",
-        fontStyle: "italic",
-      },
-      errorText: {
-        fontSize: 14,
-        color: "red",
-        fontStyle: "italic",
-      },
-      optionsButton: {
-        padding: 5,
-        marginLeft: 5,
-      },
-      modalOverlay: {
-        flex: 1,
-        backgroundColor: "rgba(0,0,0,0.5)",
-        justifyContent: "center",
-        alignItems: "center",
-      },
-      messageOptionsContainer: {
-        backgroundColor: "#fff",
-        borderRadius: 10,
-        padding: 10,
-        width: "80%",
-      },
-      optionButton: {
-        flexDirection: "row",
-        alignItems: "center",
-        paddingVertical: 10,
-        borderBottomWidth: 1,
-        borderBottomColor: "#E5E5EA",
-      },
-      optionText: {
-        marginLeft: 10,
-        fontSize: 16,
-        color: "#000",
-      },
-      inputContainer: {
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-        backgroundColor: "#F5F5F5",
-      },
-      input: {
-        flex: 1,
-        backgroundColor: "#fff",
-        borderRadius: 20,
-        paddingHorizontal: 15,
-        paddingVertical: 10,
-        marginHorizontal: 10,
-      },
-      modalContainer: {
-        flex: 1,
-        backgroundColor: "rgba(0,0,0,0.5)",
-        justifyContent: "flex-end",
-      },
-      stickerPicker: {
-        backgroundColor: "#fff",
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        padding: 20,
-        maxHeight: "50%",
-      },
-      stickerSearchInput: {
-        borderWidth: 1,
-        borderColor: "#E5E5EA",
-        borderRadius: 10,
-        padding: 10,
-        marginBottom: 10,
-      },
-      stickerThumbnail: {
-        width: 100,
-        height: 100,
-        margin: 5,
-      },
-      closeButton: {
-        marginTop: 10,
-        backgroundColor: "#007AFF",
-        borderRadius: 10,
-        padding: 10,
-        alignItems: "center",
-      },
-      closeButtonText: {
-        color: "#fff",
-        fontSize: 16,
-      },
-      forwardModalContent: {
-        backgroundColor: "#fff",
-        borderRadius: 10,
-        padding: 20,
-        width: "90%",
-        maxHeight: "80%",
-      },
-      modalTitle: {
-        fontSize: 18,
-        fontWeight: "bold",
-        marginBottom: 10,
-      },
-      forwardItem: {
-        flexDirection: "row",
-        alignItems: "center",
-        paddingVertical: 10,
-        borderBottomWidth: 1,
-        borderBottomColor: "#E5E5EA",
-      },
-      forwardAvatar: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        marginRight: 10,
-      },
-      forwardAvatarPlaceholder: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: "#ccc",
-        marginRight: 10,
-      },
-      forwardItemText: {
-        fontSize: 16,
-        color: "#000",
-      },
-      modalButtons: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        marginTop: 20,
-      },
-      modalButton: {
-        flex: 1,
-        padding: 10,
-        borderRadius: 10,
-        alignItems: "center",
-        marginHorizontal: 5,
-      },
-      modalButtonText: {
-        color: "#fff",
-        fontSize: 16,
-      },
-      pinnedMessageContainer: {
-        backgroundColor: "#E5E5EA",
-        padding: 10,
-        marginHorizontal: 10,
-        marginTop: 10,
-        borderRadius: 10,
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-      },
-      pinnedMessageLabel: {
-        fontSize: 14,
-        fontWeight: "bold",
-        color: "#007AFF",
-      },
-      pinnedMessageText: {
-        fontSize: 14,
-        color: "#000",
-        flex: 1,
-        marginHorizontal: 10,
-      },
-      unpinButton: {
-        flexDirection: "row",
-        alignItems: "center",
-      },
-      unpinButtonText: {
-        fontSize: 14,
-        color: "#007AFF",
-        marginLeft: 5,
-      },
-      loadingContainer: {
-        flex: 1,
-        justifyContent: "center",
-        alignItems: "center",
-      },
-      scrollButton: {
-        position: "absolute",
-        bottom: 80,
-        right: 20,
-        backgroundColor: "rgba(0, 0, 0, 0.5)",
-        borderRadius: 25,
-        padding: 5,
-      },
-      scrollButtonInner: {
-        backgroundColor: "#007AFF",
-        borderRadius: 20,
-        width: 40,
-        height: 40,
-        justifyContent: "center",
-        alignItems: "center",
-      },
-    });
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#fff",
+  },
+  navbar: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#007AFF",
+    paddingHorizontal: 10,
+  },
+  groupNameContainer: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 10,
+  },
+  groupAvatarContainer: {
+    flexDirection: "column",
+    alignItems: "center",
+  },
+  avatarWrapper: {
+    flexDirection: "column",
+  },
+  avatarRow: {
+    flexDirection: "row",
+  },
+  groupAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: "#fff",
+  },
+  membersCountBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#fff",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#007AFF",
+  },
+  membersCountText: {
+    color: "#007AFF",
+    fontSize: 12,
+    fontWeight: "bold",
+  },
+  groupInfo: {
+    marginLeft: 10,
+  },
+  groupName: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  groupDetails: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  groupDetailIcon: {
+    marginRight: 5,
+  },
+  groupDetailText: {
+    color: "#fff",
+    fontSize: 14,
+  },
+  icon: {
+    marginHorizontal: 10,
+  },
+  chatContainer: {
+    flex: 1,
+  },
+  messageContainer: {
+    flexDirection: "row",
+    marginVertical: 5,
+    alignItems: "flex-end",
+  },
+  myMessage: {
+    justifyContent: "flex-end",
+  },
+  otherMessage: {
+    justifyContent: "flex-start",
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 10,
+  },
+  avatarPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#ccc",
+    marginRight: 10,
+  },
+  messageBoxWrapper: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    maxWidth: "80%",
+  },
+  messageBox: {
+    backgroundColor: "#E5E5EA",
+    borderRadius: 15,
+    padding: 10,
+  },
+  messageText: {
+    fontSize: 16,
+    color: "#000",
+  },
+  seenText: {
+    fontSize: 12,
+    color: "#666",
+    marginTop: 5,
+    textAlign: "right",
+  },
+  image: {
+    width: 200,
+    height: 200,
+    borderRadius: 10,
+  },
+  videoContainer: {
+    width: 200,
+    height: 200,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  video: {
+    width: "100%",
+    height: "100%",
+  },
+  sticker: {
+    width: 100,
+    height: 100,
+  },
+  fileContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  fileText: {
+    marginLeft: 10,
+    fontSize: 16,
+    color: "#007AFF",
+  },
+  voiceContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  voiceText: {
+    marginLeft: 10,
+    fontSize: 16,
+    color: "#007AFF",
+  },
+  recalledMessage: {
+    fontSize: 14,
+    color: "#666",
+    fontStyle: "italic",
+  },
+  forwardedLabel: {
+    fontSize: 12,
+    color: "#666",
+    fontStyle: "italic",
+    marginBottom: 5,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: "#666",
+    fontStyle: "italic",
+  },
+  errorText: {
+    fontSize: 14,
+    color: "red",
+    fontStyle: "italic",
+  },
+  optionsButton: {
+    padding: 5,
+    marginLeft: 5,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  messageOptionsContainer: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    padding: 10,
+    width: "80%",
+  },
+  optionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E5EA",
+  },
+  optionText: {
+    marginLeft: 10,
+    fontSize: 16,
+    color: "#000",
+  },
+  inputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: "#F5F5F5",
+  },
+  input: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    marginHorizontal: 10,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  stickerPicker: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: "50%",
+  },
+  stickerSearchInput: {
+    borderWidth: 1,
+    borderColor: "#E5E5EA",
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+  },
+  stickerThumbnail: {
+    width: 100,
+    height: 100,
+    margin: 5,
+  },
+  closeButton: {
+    marginTop: 10,
+    backgroundColor: "#007AFF",
+    borderRadius: 10,
+    padding: 10,
+    alignItems: "center",
+  },
+  closeButtonText: {
+    color: "#fff",
+    fontSize: 16,
+  },
+  forwardModalContent: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    padding: 20,
+    width: "90%",
+    maxHeight: "80%",
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 10,
+  },
+  forwardItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E5EA",
+  },
+  forwardAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 10,
+  },
+  forwardAvatarPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#ccc",
+    marginRight: 10,
+  },
+  forwardItemText: {
+    fontSize: 16,
+    color: "#000",
+  },
+  modalButtons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 20,
+  },
+  modalButton: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 10,
+    alignItems: "center",
+    marginHorizontal: 5,
+  },
+  modalButtonText: {
+    color: "#fff",
+    fontSize: 16,
+  },
+  pinnedMessageContainer: {
+    backgroundColor: "#E5E5EA",
+    padding: 10,
+    marginHorizontal: 10,
+    marginTop: 10,
+    borderRadius: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  pinnedMessageLabel: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#007AFF",
+  },
+  pinnedMessageText: {
+    fontSize: 14,
+    color: "#000",
+    flex: 1,
+    marginHorizontal: 10,
+  },
+  unpinButton: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  unpinButtonText: {
+    fontSize: 14,
+    color: "#007AFF",
+    marginLeft: 5,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  scrollButton: {
+    position: "absolute",
+    bottom: 80,
+    right: 20,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    borderRadius: 25,
+    padding: 5,
+  },
+  scrollButtonInner: {
+    backgroundColor: "#007AFF",
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+});
