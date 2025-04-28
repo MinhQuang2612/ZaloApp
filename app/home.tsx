@@ -58,6 +58,7 @@ export default function Home() {
   const joinedContactRooms = useRef(new Set<string>());
   const isMounted = useRef(true);
   const isSocketConnected = useRef(false);
+  const prevMessagesRef = useRef<CombinedMessage[]>([]); // Lưu trữ messages trước đó để so sánh
 
   const saveMessageStatus = async (messageID: string, status: "deleted" | "recalled") => {
     try {
@@ -118,15 +119,15 @@ export default function Home() {
     return context;
   };
 
-  const getUserName = (userID: string): string => {
+  const getUserName = useCallback((userID: string): string => {
     const contact = contacts.find((c) => c.userID === userID);
     return contact?.username || "Người dùng không xác định";
-  };
+  }, [contacts]);
 
-  const getUserAvatar = (userID: string): string | null => {
+  const getUserAvatar = useCallback((userID: string): string | null => {
     const contact = contacts.find((c) => c.userID === userID);
     return contact?.avatar || null;
-  };
+  }, [contacts]);
 
   const getLastSeenTimestamp = async (groupID: string): Promise<string | null> => {
     try {
@@ -164,6 +165,7 @@ export default function Home() {
       }
       setGroupMembersCount(membersCount);
 
+      // Chỉ cập nhật state nếu dữ liệu thay đổi
       setContacts((prev) =>
         JSON.stringify(prev) !== JSON.stringify(contactsData) ? contactsData : prev
       );
@@ -294,9 +296,11 @@ export default function Home() {
         ...allGroupMessages.map((msg) => ({ type: "group" as const, data: msg })),
       ].sort((a, b) => new Date(b.data.createdAt).getTime() - new Date(a.data.createdAt).getTime());
 
-      setMessages((prev) =>
-        JSON.stringify(prev) !== JSON.stringify(combinedMessages) ? combinedMessages : prev
-      );
+      // Chỉ cập nhật nếu messages thực sự thay đổi
+      if (JSON.stringify(combinedMessages) !== JSON.stringify(prevMessagesRef.current)) {
+        setMessages(combinedMessages);
+        prevMessagesRef.current = combinedMessages;
+      }
     } catch (error) {
       console.error("Lỗi khi tải tin nhắn:", error);
     } finally {
@@ -304,7 +308,7 @@ export default function Home() {
     }
   }, []);
 
-  const updateGroupUnreadCount = async (groupID: string, userID: string) => {
+  const updateGroupUnreadCount = useCallback(async (groupID: string, userID: string) => {
     try {
       const groupMessages = await fetchMessages(groupID, true);
       
@@ -329,16 +333,24 @@ export default function Home() {
           }
           return msg;
         });
-        return [...updatedMessages];
+
+        // Chỉ cập nhật nếu messages thực sự thay đổi
+        if (JSON.stringify(updatedMessages) !== JSON.stringify(prevMessagesRef.current)) {
+          prevMessagesRef.current = updatedMessages;
+          return updatedMessages;
+        }
+        return prev;
       });
     } catch (error) {
       console.error(`Lỗi khi cập nhật unreadCount cho nhóm ${groupID}:`, error);
     }
-  };
+  }, []);
 
   const setupSocketListeners = useCallback(() => {
-    console.log("Home.tsx: Setting up socket listeners for user:", currentUserID);
-    if (!currentUserID) return () => {};
+    if (!currentUserID) {
+      console.log("Home.tsx: No currentUserID, skipping setupSocketListeners");
+      return () => {};
+    }
 
     const listeners = [
       {
@@ -358,115 +370,133 @@ export default function Home() {
           }
           processedMessageIDs.current.add(message.messageID);
 
-          console.log("Home.tsx: Checking if message is relevant - currentUserID:", currentUserID, "senderID:", message.senderID, "receiverID:", message.receiverID);
-          if (message.groupID && message.groupID !== "NONE") {
-            const group = groups.find((g) => g.groupID === message.groupID);
-            if (!group) {
-              console.log("Home.tsx: Group not found, skipping:", message.groupID);
-              return;
-            }
-
-            let updatedContext = message.context;
-            if (
-              message.messageTypeID === "type2" ||
-              message.messageTypeID === "type3" ||
-              message.messageTypeID === "type5" ||
-              message.messageTypeID === "type6"
-            ) {
-              updatedContext = convertFilePathToURL(message.context);
-            }
-
-            const newGroupMessage: HomeGroupMessage = {
-              groupID: message.groupID,
-              groupName: group.groupName,
-              context: updatedContext,
-              createdAt: message.createdAt,
-              messageID: message.messageID,
-              messageTypeID: message.messageTypeID,
-              unreadCount: 0,
-            };
-
-            console.log("Home.tsx: Adding new group message:", newGroupMessage);
-            setMessages((prev) => {
-              const existingIndex = prev.findIndex(
-                (msg) => isGroupMessage(msg) && msg.data.groupID === message.groupID
-              );
-
-              let updatedMessages: CombinedMessage[];
-              if (existingIndex !== -1) {
-                updatedMessages = [...prev];
-                updatedMessages[existingIndex] = {
-                  type: "group",
-                  data: newGroupMessage,
-                };
-              } else {
-                updatedMessages = [{ type: "group", data: newGroupMessage }, ...prev];
+          const updateState = () => {
+            if (!isMounted.current || !currentUserID) return;
+            
+            console.log("Home.tsx: Checking if message is relevant - currentUserID:", currentUserID, "senderID:", message.senderID, "receiverID:", message.receiverID);
+            if (message.groupID && message.groupID !== "NONE") {
+              const group = groups.find((g) => g.groupID === message.groupID);
+              if (!group) {
+                console.log("Home.tsx: Group not found, skipping:", message.groupID);
+                return;
               }
 
-              const sortedMessages = updatedMessages.sort(
-                (a, b) => new Date(b.data.createdAt).getTime() - new Date(a.data.createdAt).getTime()
-              );
-              console.log("Home.tsx: Updated messages (group):", sortedMessages);
-              return sortedMessages;
-            });
-
-            updateGroupUnreadCount(message.groupID, currentUserID);
-          } else if (message.senderID === currentUserID || message.receiverID === currentUserID) {
-            const contactID =
-              message.senderID === currentUserID ? message.receiverID! : message.senderID;
-
-            let updatedContext = message.context;
-            if (
-              message.messageTypeID === "type2" ||
-              message.messageTypeID === "type3" ||
-              message.messageTypeID === "type5" ||
-              message.messageTypeID === "type6"
-            ) {
-              updatedContext = convertFilePathToURL(message.context);
-            }
-
-            const newHomeMessage: HomeMessage = {
-              senderID: contactID,
-              context: updatedContext,
-              createdAt: message.createdAt,
-              messageID: message.messageID,
-              messageTypeID: message.messageTypeID,
-              unreadCount: message.receiverID === currentUserID && !message.seenStatus?.includes(currentUserID) ? 1 : 0,
-            };
-
-            console.log("Home.tsx: Adding new single message:", newHomeMessage);
-            setMessages((prev) => {
-              const existingIndex = prev.findIndex(
-                (msg) => msg.type === "single" && (msg.data as HomeMessage).senderID === contactID
-              );
-
-              let updatedMessages: CombinedMessage[];
-              if (existingIndex !== -1) {
-                updatedMessages = [...prev];
-                const existingMessage = updatedMessages[existingIndex].data as HomeMessage;
-                updatedMessages[existingIndex] = {
-                  type: "single",
-                  data: {
-                    ...newHomeMessage,
-                    unreadCount:
-                      message.receiverID === currentUserID && !message.seenStatus?.includes(currentUserID)
-                        ? existingMessage.unreadCount + 1
-                        : existingMessage.unreadCount,
-                  },
-                };
-              } else {
-                updatedMessages = [{ type: "single", data: newHomeMessage }, ...prev];
+              let updatedContext = message.context;
+              if (
+                message.messageTypeID === "type2" ||
+                message.messageTypeID === "type3" ||
+                message.messageTypeID === "type5" ||
+                message.messageTypeID === "type6"
+              ) {
+                updatedContext = convertFilePathToURL(message.context);
               }
 
-              const sortedMessages = updatedMessages.sort(
-                (a, b) => new Date(b.data.createdAt).getTime() - new Date(a.data.createdAt).getTime()
-              );
-              console.log("Home.tsx: Updated messages (single):", sortedMessages);
-              return sortedMessages;
-            });
-          } else {
-            console.log("Home.tsx: Message not relevant to current user, skipping:", message);
-          }
+              const newGroupMessage: HomeGroupMessage = {
+                groupID: message.groupID,
+                groupName: group.groupName,
+                context: updatedContext,
+                createdAt: message.createdAt,
+                messageID: message.messageID,
+                messageTypeID: message.messageTypeID,
+                unreadCount: 0,
+              };
+
+              console.log("Home.tsx: Adding new group message:", newGroupMessage);
+              setMessages((prev) => {
+                const existingIndex = prev.findIndex(
+                  (msg) => isGroupMessage(msg) && msg.data.groupID === message.groupID
+                );
+
+                let updatedMessages: CombinedMessage[];
+                if (existingIndex !== -1) {
+                  updatedMessages = [...prev];
+                  updatedMessages[existingIndex] = {
+                    type: "group",
+                    data: newGroupMessage,
+                  };
+                } else {
+                  updatedMessages = [{ type: "group", data: newGroupMessage }, ...prev];
+                }
+
+                const sortedMessages = updatedMessages.sort(
+                  (a, b) => new Date(b.data.createdAt).getTime() - new Date(a.data.createdAt).getTime()
+                );
+                console.log("Home.tsx: Updated messages (group):", sortedMessages);
+
+                // Chỉ cập nhật nếu messages thực sự thay đổi
+                if (JSON.stringify(sortedMessages) !== JSON.stringify(prevMessagesRef.current)) {
+                  prevMessagesRef.current = sortedMessages;
+                  return sortedMessages;
+                }
+                return prev;
+              });
+
+              updateGroupUnreadCount(message.groupID, currentUserID);
+            } else if (message.senderID === currentUserID || message.receiverID === currentUserID) {
+              const contactID =
+                message.senderID === currentUserID ? message.receiverID! : message.senderID;
+
+              let updatedContext = message.context;
+              if (
+                message.messageTypeID === "type2" ||
+                message.messageTypeID === "type3" ||
+                message.messageTypeID === "type5" ||
+                message.messageTypeID === "type6"
+              ) {
+                updatedContext = convertFilePathToURL(message.context);
+              }
+
+              const newHomeMessage: HomeMessage = {
+                senderID: contactID,
+                context: updatedContext,
+                createdAt: message.createdAt,
+                messageID: message.messageID,
+                messageTypeID: message.messageTypeID,
+                unreadCount: message.receiverID === currentUserID && !message.seenStatus?.includes(currentUserID) ? 1 : 0,
+              };
+
+              console.log("Home.tsx: Adding new single message:", newHomeMessage);
+              setMessages((prev) => {
+                const existingIndex = prev.findIndex(
+                  (msg) => msg.type === "single" && (msg.data as HomeMessage).senderID === contactID
+                );
+
+                let updatedMessages: CombinedMessage[];
+                if (existingIndex !== -1) {
+                  updatedMessages = [...prev];
+                  const existingMessage = updatedMessages[existingIndex].data as HomeMessage;
+                  updatedMessages[existingIndex] = {
+                    type: "single",
+                    data: {
+                      ...newHomeMessage,
+                      unreadCount:
+                        message.receiverID === currentUserID && !message.seenStatus?.includes(currentUserID)
+                          ? existingMessage.unreadCount + 1
+                          : existingMessage.unreadCount,
+                    },
+                  };
+                } else {
+                  updatedMessages = [{ type: "single", data: newHomeMessage }, ...prev];
+                }
+
+                const sortedMessages = updatedMessages.sort(
+                  (a, b) => new Date(b.data.createdAt).getTime() - new Date(a.data.createdAt).getTime()
+                );
+                console.log("Home.tsx: Updated messages (single):", sortedMessages);
+
+                // Chỉ cập nhật nếu messages thực sự thay đổi
+                if (JSON.stringify(sortedMessages) !== JSON.stringify(prevMessagesRef.current)) {
+                  prevMessagesRef.current = sortedMessages;
+                  return sortedMessages;
+                }
+                return prev;
+              });
+            } else {
+              console.log("Home.tsx: Message not relevant to current user, skipping:", message);
+            }
+          };
+
+          setTimeout(updateState, 100);
         },
       },
       {
@@ -474,8 +504,8 @@ export default function Home() {
         handler: ({ messageID, seenUserID }: { messageID: string; seenUserID: string }) => {
           if (!isMounted.current) return;
           console.log("Home.tsx: Cập nhật trạng thái đã xem cho tin nhắn đơn:", messageID, seenUserID);
-          setMessages((prev) =>
-            prev.map((msg) => {
+          setMessages((prev) => {
+            const updatedMessages = prev.map((msg) => {
               if (msg.type === "single" && (msg.data as HomeMessage).messageID === messageID) {
                 const data = msg.data as HomeMessage;
                 return {
@@ -484,8 +514,14 @@ export default function Home() {
                 };
               }
               return msg;
-            })
-          );
+            });
+
+            if (JSON.stringify(updatedMessages) !== JSON.stringify(prevMessagesRef.current)) {
+              prevMessagesRef.current = updatedMessages;
+              return updatedMessages;
+            }
+            return prev;
+          });
         },
       },
       {
@@ -520,14 +556,20 @@ export default function Home() {
           if (!isMounted.current) return;
           console.log("Home.tsx: Nhận được deletedSingleMessage:", data);
           saveMessageStatus(data.messageID, "deleted");
-          setMessages((prev) =>
-            prev.map((msg) => {
+          setMessages((prev) => {
+            const updatedMessages = prev.map((msg) => {
               if (msg.type === "single" && (msg.data as HomeMessage).messageID === data.messageID) {
                 return { ...msg, data: { ...msg.data, context: "Tin nhắn đã bị xóa" } };
               }
               return msg;
-            })
-          );
+            });
+
+            if (JSON.stringify(updatedMessages) !== JSON.stringify(prevMessagesRef.current)) {
+              prevMessagesRef.current = updatedMessages;
+              return updatedMessages;
+            }
+            return prev;
+          });
         },
       },
       {
@@ -536,14 +578,20 @@ export default function Home() {
           if (!isMounted.current) return;
           console.log("Home.tsx: Nhận được recalledSingleMessage:", messageID);
           saveMessageStatus(messageID, "recalled");
-          setMessages((prev) =>
-            prev.map((msg) => {
+          setMessages((prev) => {
+            const updatedMessages = prev.map((msg) => {
               if (msg.type === "single" && (msg.data as HomeMessage).messageID === messageID) {
                 return { ...msg, data: { ...msg.data, context: "Tin nhắn đã được thu hồi" } };
               }
               return msg;
-            })
-          );
+            });
+
+            if (JSON.stringify(updatedMessages) !== JSON.stringify(prevMessagesRef.current)) {
+              prevMessagesRef.current = updatedMessages;
+              return updatedMessages;
+            }
+            return prev;
+          });
         },
       },
       {
@@ -552,14 +600,20 @@ export default function Home() {
           if (!isMounted.current) return;
           console.log("Home.tsx: Nhận được deletedGroupMessage:", data);
           saveMessageStatus(data.messageID, "deleted");
-          setMessages((prev) =>
-            prev.map((msg) => {
+          setMessages((prev) => {
+            const updatedMessages = prev.map((msg) => {
               if (isGroupMessage(msg) && msg.data.messageID === data.messageID) {
                 return { ...msg, data: { ...msg.data, context: "Tin nhắn đã bị xóa" } };
               }
               return msg;
-            })
-          );
+            });
+
+            if (JSON.stringify(updatedMessages) !== JSON.stringify(prevMessagesRef.current)) {
+              prevMessagesRef.current = updatedMessages;
+              return updatedMessages;
+            }
+            return prev;
+          });
         },
       },
       {
@@ -568,14 +622,20 @@ export default function Home() {
           if (!isMounted.current) return;
           console.log("Home.tsx: Nhận được recalledGroupMessage:", messageID);
           saveMessageStatus(messageID, "recalled");
-          setMessages((prev) =>
-            prev.map((msg) => {
+          setMessages((prev) => {
+            const updatedMessages = prev.map((msg) => {
               if (isGroupMessage(msg) && msg.data.messageID === messageID) {
                 return { ...msg, data: { ...msg.data, context: "Tin nhắn đã được thu hồi" } };
               }
               return msg;
-            })
-          );
+            });
+
+            if (JSON.stringify(updatedMessages) !== JSON.stringify(prevMessagesRef.current)) {
+              prevMessagesRef.current = updatedMessages;
+              return updatedMessages;
+            }
+            return prev;
+          });
         },
       },
       {
@@ -583,7 +643,7 @@ export default function Home() {
         handler: () => {
           console.log("Home.tsx: Socket connected:", socket.id);
           isSocketConnected.current = true;
-          joinRooms(); // Tham gia các phòng ngay khi socket kết nối
+          joinRooms();
         },
       },
       {
@@ -596,15 +656,13 @@ export default function Home() {
       {
         event: "newMember",
         handler: async (data: { userID: string; groupID: string }) => {
-          if (!isMounted.current) return;
+          if (!isMounted.current || !currentUserID) return;
           console.log("Home.tsx: Thành viên mới được thêm:", data);
-          if (currentUserID) {
-            await loadMessages(currentUserID);
-            const cacheKey = `cachedUserGroups_${currentUserID}`;
-            const userGroups = await fetchUserGroups(currentUserID);
-            await AsyncStorage.setItem(cacheKey, JSON.stringify(userGroups));
-            console.log("Đã cập nhật cache nhóm sau newMember:", cacheKey);
-          }
+          await loadMessages(currentUserID);
+          const cacheKey = `cachedUserGroups_${currentUserID}`;
+          const userGroups = await fetchUserGroups(currentUserID);
+          await AsyncStorage.setItem(cacheKey, JSON.stringify(userGroups));
+          console.log("Đã cập nhật cache nhóm sau newMember:", cacheKey);
         },
       },
     ];
@@ -613,11 +671,11 @@ export default function Home() {
     return () => {
       removeSocketListeners(listeners.map((l) => l.event));
     };
-  }, [currentUserID, contacts, groups, messages]);
+  }, [currentUserID, groups, updateGroupUnreadCount]);
 
   const joinRooms = useCallback(() => {
-    if (!currentUserID || !isSocketConnected.current) {
-      console.log("Home.tsx: Socket not connected or userID not available, skipping joinRooms");
+    if (!currentUserID) {
+      console.log("Home.tsx: No currentUserID, skipping joinRooms");
       return;
     }
 
@@ -634,7 +692,7 @@ export default function Home() {
     });
 
     groups.forEach((group) => {
-      joinGroupRoom(group.groupID); // Sử dụng hàm từ socket service
+      joinGroupRoom(group.groupID);
     });
   }, [currentUserID, contacts, groups]);
 
@@ -659,9 +717,8 @@ export default function Home() {
         }
         setCurrentUserID(userID);
 
-        await connectSocket(); // Kết nối socket trước
-        setupSocketListeners(); // Thiết lập listeners
-        await loadMessages(userID); // Tải tin nhắn
+        await connectSocket();
+        await loadMessages(userID);
       } catch (error) {
         console.error("Lỗi khi khởi tạo:", error);
       } finally {
@@ -687,21 +744,42 @@ export default function Home() {
         "newMember",
       ]);
     };
-  }, [setupSocketListeners, loadMessages]);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      if (currentUserID) {
-        console.log("Home.tsx: Screen focused, reloading messages for user:", currentUserID);
-        processedMessageIDs.current.clear();
-        console.log("Home.tsx: Cleared_processedMessageIDs");
-        joinRooms(); // Đảm bảo tham gia lại các phòng
+      if (!currentUserID || !isMounted.current) return;
+
+      console.log("Home.tsx: Screen focused, reloading messages and setting up socket for user:", currentUserID);
+
+      // Xóa processedMessageIDs để đảm bảo không bỏ sót tin nhắn mới
+      processedMessageIDs.current.clear();
+      console.log("Home.tsx: Cleared processedMessageIDs");
+
+      // Tự động load lại messages khi quay lại từ chat
+      loadMessages(currentUserID);
+
+      // Kết nối lại socket nếu cần
+      if (!isSocketConnected.current) {
+        console.log("Home.tsx: Socket not connected, reconnecting...");
+        connectSocket().then(() => {
+          console.log("Home.tsx: Socket reconnected successfully");
+          joinRooms();
+        }).catch((error) => {
+          console.error("Home.tsx: Failed to reconnect socket:", error);
+        });
+      } else {
+        joinRooms();
       }
+
+      // Thiết lập lại socket listeners
+      const cleanup = setupSocketListeners();
 
       return () => {
         console.log("Home.tsx: Screen unfocused");
+        cleanup();
       };
-    }, [currentUserID, joinRooms])
+    }, [currentUserID, loadMessages, joinRooms, setupSocketListeners])
   );
 
   const onRefresh = async () => {
@@ -771,7 +849,7 @@ export default function Home() {
         );
       }
     },
-    [contacts, groups, groupMembersCount]
+    [contacts, groups, groupMembersCount, getUserName, getUserAvatar]
   );
 
   if (loading) {
