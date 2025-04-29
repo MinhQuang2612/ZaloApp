@@ -22,20 +22,14 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fetchMessages, Message } from "../services/message";
 import { fetchUserGroups, fetchGroupMembers, GroupMember, Group } from "../services/group";
 import { fetchContacts, Contact } from "../services/contacts";
-import { connectSocket, deleteMessage, recallMessage, registerSocketListeners, removeSocketListeners, joinGroup } from "../services/socket";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import { Audio, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import socket, { connectSocket, deleteMessage, recallMessage, registerSocketListeners, removeSocketListeners, joinGroup, joinGroupRoom } from "../services/socket";
 import api from "../services/api";
 
-// Đảm bảo socket được import và khởi tạo đúng
-import { io } from "socket.io-client";
-const socket = io(process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000", {
-  autoConnect: false,
-  transports: ["websocket"],
-});
 
 type SocketResponse =
   | "đang gửi"
@@ -621,13 +615,13 @@ export default function GroupChat() {
       console.log("GroupChat.tsx: Message already sent, skipping:", newMessage.messageID);
       return;
     }
-
+  
     try {
       if (!socket.connected) {
         console.log("GroupChat.tsx: Socket not connected, attempting to reconnect...");
         await connectSocket();
       }
-
+  
       const senderAvatar = await fetchUserAvatar(currentUserID!);
       setMessages((prev) => [...prev, { ...newMessage, senderAvatar, isDelivered: false }]);
       if (isAtBottom) {
@@ -635,7 +629,7 @@ export default function GroupChat() {
       } else {
         setShowScrollButton(true);
       }
-
+  
       return new Promise<void>((resolve, reject) => {
         socket.emit("sendMessage", newMessage, async (response: SocketResponse) => {
           console.log("GroupChat.tsx: Server response:", response);
@@ -655,119 +649,159 @@ export default function GroupChat() {
             reject(new Error(response));
           }
         });
+  
+        // Thêm timeout cho emit
+        setTimeout(() => {
+          if (!socket.connected) {
+            reject(new Error("Socket not connected after timeout"));
+          }
+        }, 5000);
       });
     } catch (error: any) {
+      console.error("Error sending message:", error.message);
       if (onFailure) onFailure(error);
+      Alert.alert(
+        "Lỗi",
+        `Không thể gửi tin nhắn: ${error.message}`,
+        [
+          { text: "Hủy", style: "cancel" },
+          {
+            text: "Thử lại",
+            onPress: () => sendMessage(newMessage, onSuccess, onFailure),
+          },
+        ]
+      );
       throw error;
     }
   };
 
   const setupSocketListeners = () => {
-    if (!socket) return;
-
-    socket.on("connect", () => {
-      console.log("GroupChat.tsx: Socket connected");
-      if (currentUserID && groupID) {
-        joinGroup(currentUserID, groupID as string);
-      }
-    });
-
-    socket.on("disconnect", (reason) => {
-      console.log("GroupChat.tsx: Socket disconnected:", reason);
-    });
-
-    const handleReceiveMessage = async (message: GroupMessage) => {
-      console.log("GroupChat.tsx: Received message:", message);
-      if (message.groupID === groupID) {
-        const messageExists = messages.some((m) => m.messageID === message.messageID);
-        if (messageExists) {
-          console.log("GroupChat.tsx: Message already exists, skipping:", message.messageID);
-          return;
-        }
-
-        if (
-          message.messageTypeID === "type2" ||
-          message.messageTypeID === "type3" ||
-          message.messageTypeID === "type5" ||
-          message.messageTypeID === "type6"
-        ) {
-          message.context = convertFilePathToURL(message.context);
-        }
-
-        const senderAvatar = await fetchUserAvatar(message.senderID);
-        const newMessage = { ...message, senderAvatar, isDelivered: true };
-
-        setMessages((prev) => {
-          const updatedMessages = [...prev, newMessage];
-          if (isAtBottom) {
-            scrollToBottom();
-          } else {
-            setShowScrollButton(true);
+    const listeners = [
+      {
+        event: "connect",
+        handler: async () => {
+          console.log("GroupChat.tsx: Socket connected:", socket.id);
+          try {
+            if (currentUserID && groupID) {
+              await joinGroup(currentUserID, groupID as string);
+              console.log("GroupChat.tsx: Successfully joined group:", groupID);
+              const response = await joinGroupRoom(groupID as string);
+              console.log("GroupChat.tsx: Join group room response:", response);
+            }
+          } catch (error: any) {
+            console.error("GroupChat.tsx: Failed to join group or room:", error.message);
+            Alert.alert("Lỗi", "Không thể tham gia nhóm hoặc phòng nhóm. Vui lòng thử lại.");
+            router.back();
           }
-          return updatedMessages;
-        });
-
-        await AsyncStorage.setItem(`groupMessages_${groupID}`, JSON.stringify([...messages, newMessage]));
-
-        socket.emit("updateUnreadCount", { groupID, userID: currentUserID });
-      }
-    };
-
-    const handleUpdateSeenStatus = (data: { messageID: string; userID: string }) => {
-      console.log("GroupChat.tsx: Update seen status:", data);
-      if (data.userID !== currentUserID) {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.messageID === data.messageID
-              ? {
-                  ...msg,
-                  seenStatus: [...new Set([...(msg.seenStatus || []), data.userID])],
-                }
-              : msg
-          )
-        );
-      }
-    };
-
-    const handleDeletedMessage = (data: { messageID: string; userID: string }) => {
-      console.log("GroupChat.tsx: Message deleted:", data);
-      if (data.userID !== currentUserID) {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.messageID === data.messageID
-              ? {
-                  ...msg,
-                  deleteStatusByUser: [...(msg.deleteStatusByUser || []), data.userID],
-                }
-              : msg
-          )
-        );
-      }
-    };
-
-    const handleRecalledMessage = (data: { messageID: string; userID: string }) => {
-      console.log("GroupChat.tsx: Message recalled:", data);
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.messageID === data.messageID
-            ? { ...msg, recallStatus: true }
-            : msg
-        )
-      );
-    };
-
-    socket.on("receiveMessage", handleReceiveMessage);
-    socket.on("updateGroupChatSeenStatus", handleUpdateSeenStatus);
-    socket.on("deletedGroupMessage", handleDeletedMessage);
-    socket.on("recalledGroupMessage", handleRecalledMessage);
-
+        },
+      },
+      {
+        event: "disconnect",
+        handler: (reason: string) => {
+          console.log("GroupChat.tsx: Socket disconnected:", reason);
+        },
+      },
+      {
+        event: "receiveMessage",
+        handler: async (message: GroupMessage) => {
+          console.log("GroupChat.tsx: Received message:", message);
+          if (message.groupID === groupID) {
+            const messageExists = messages.some((m) => m.messageID === message.messageID);
+            if (messageExists) {
+              console.log("GroupChat.tsx: Message already exists, skipping:", message.messageID);
+              return;
+            }
+  
+            if (
+              message.messageTypeID === "type2" ||
+              message.messageTypeID === "type3" ||
+              message.messageTypeID === "type5" ||
+              message.messageTypeID === "type6"
+            ) {
+              message.context = convertFilePathToURL(message.context);
+            }
+  
+            const senderAvatar = await fetchUserAvatar(message.senderID);
+            const newMessage = { ...message, senderAvatar, isDelivered: true };
+  
+            setMessages((prev) => {
+              const updatedMessages = [...prev, newMessage];
+              if (isAtBottom) {
+                scrollToBottom();
+              } else {
+                setShowScrollButton(true);
+              }
+              return updatedMessages;
+            });
+  
+            await AsyncStorage.setItem(`groupMessages_${groupID}`, JSON.stringify([...messages, newMessage]));
+  
+            socket.emit("updateUnreadCount", { groupID, userID: currentUserID });
+          }
+        },
+      },
+      {
+        event: "updateGroupChatSeenStatus",
+        handler: (data: { messageID: string; userID: string }) => {
+          console.log("GroupChat.tsx: Update seen status:", data);
+          if (data.userID !== currentUserID) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.messageID === data.messageID
+                  ? {
+                      ...msg,
+                      seenStatus: [...new Set([...(msg.seenStatus || []), data.userID])],
+                    }
+                  : msg
+              )
+            );
+          }
+        },
+      },
+      {
+        event: "deletedGroupMessage",
+        handler: (data: { messageID: string; userID: string }) => {
+          console.log("GroupChat.tsx: Message deleted:", data);
+          if (data.userID !== currentUserID) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.messageID === data.messageID
+                  ? {
+                      ...msg,
+                      deleteStatusByUser: [...(msg.deleteStatusByUser || []), data.userID],
+                    }
+                  : msg
+              )
+            );
+          }
+        },
+      },
+      {
+        event: "recalledGroupMessage",
+        handler: (data: { messageID: string; userID: string }) => {
+          console.log("GroupChat.tsx: Message recalled:", data);
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.messageID === data.messageID
+                ? { ...msg, recallStatus: true }
+                : msg
+            )
+          );
+        },
+      },
+    ];
+  
+    registerSocketListeners(listeners);
+  
     return () => {
-      socket.off("connect");
-      socket.off("disconnect");
-      socket.off("receiveMessage", handleReceiveMessage);
-      socket.off("updateGroupChatSeenStatus", handleUpdateSeenStatus);
-      socket.off("deletedGroupMessage", handleDeletedMessage);
-      socket.off("recalledGroupMessage", handleRecalledMessage);
+      removeSocketListeners([
+        "connect",
+        "disconnect",
+        "receiveMessage",
+        "updateGroupChatSeenStatus",
+        "deletedGroupMessage",
+        "recalledGroupMessage",
+      ]);
     };
   };
 
@@ -777,15 +811,16 @@ export default function GroupChat() {
     try {
       if (!socket.connected) {
         await connectSocket();
+        console.log("GroupChat.tsx: Socket connected successfully");
       }
-      console.log("GroupChat.tsx: Socket connected successfully");
-    } catch (error) {
-      console.error("Không thể kết nối socket:", error);
+    } catch (error: any) {
+      console.error("Không thể kết nối socket:", error.message);
       Alert.alert(
         "Lỗi",
         "Không thể kết nối tới server. Vui lòng kiểm tra kết nối mạng hoặc liên hệ hỗ trợ.",
         [
-          { text: "OK", onPress: () => router.back() }
+          { text: "OK", onPress: () => router.back() },
+          { text: "Thử lại", onPress: () => initializeSocketAndData() },
         ]
       );
       setLoading(false);
@@ -841,7 +876,7 @@ export default function GroupChat() {
       if (error.message === "user đã là thành viên của nhóm này") {
         console.log("GroupChat.tsx: User is already a member of the group");
       } else {
-        console.error("Lỗi khi tham gia vào nhóm:", error);
+        console.error("Lỗi khi tham gia vào nhóm:", error.message);
         Alert.alert("Lỗi", "Không thể tham gia vào nhóm. Vui lòng thử lại.");
         setLoading(false);
         return;

@@ -47,9 +47,26 @@ export const connectSocket = async (): Promise<void> => {
   }
 };
 
-export const joinGroupRoom = (groupID: string) => {
-  socket.emit("joinGroupRoom", groupID);
-  console.log("Joined group room:", groupID);
+export const joinGroupRoom = (groupID: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    if (!socket.connected) {
+      reject(new Error("Socket không kết nối. Vui lòng thử lại."));
+      return;
+    }
+
+    socket.emit("joinGroupRoom", groupID, (response: string) => {
+      console.log("Join group room response:", response);
+      if (response === "Đã tham gia phòng nhóm") {
+        resolve(response);
+      } else {
+        reject(new Error(response));
+      }
+    });
+
+    setTimeout(() => {
+      reject(new Error("joinGroupRoom timeout"));
+    }, 5000); // Timeout sau 5 giây
+  });
 };
 
 export const joinGroup = (userID: string, groupID: string): Promise<string> => {
