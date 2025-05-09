@@ -10,8 +10,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.truonghuutri.zaloapp",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Ứng dụng cần truy cập thư viện ảnh để bạn có thể gửi ảnh trong khung chat."
+        "NSPhotoLibraryUsageDescription": "Ứng dụng cần truy cập thư viện ảnh để bạn có thể gửi ảnh trong khung chat.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -19,9 +21,12 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "package": "com.truonghuutri.zaloapp",
       "permissions": [
         "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE"
+        "WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
@@ -34,7 +39,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/logo.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
@@ -44,6 +49,11 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "c7ec503f-2f1f-4010-b088-c40ce1b17daf"
+      }
     }
   }
 }
