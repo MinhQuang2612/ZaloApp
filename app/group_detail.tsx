@@ -16,12 +16,16 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fetchGroupMembers, fetchUserGroups, GroupMember } from "../services/group";
-import { addGroupMember, deleteGroup, kickMember, leaveGroup } from "../services/socket";
+import { addGroupMember, deleteGroup, kickMember, leaveGroup, leaderLeaveGroup } from "../services/socket";
 import socket from "../services/socket";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import api from "../services/api";
+import { fetchContacts, Contact } from "../services/contacts";
+
+type GroupMemberWithInfo = GroupMember & { avatar?: string; username: string };
 
 type MemberItemProps = {
-  member: GroupMember;
+  member: GroupMemberWithInfo;
   currentUserID: string | null;
   isLeader: boolean;
   onKick: (userID: string) => void;
@@ -33,12 +37,12 @@ const MemberItem = ({ member, currentUserID, isLeader, onKick, onViewProfile }: 
     <View style={styles.memberItem}>
       <TouchableOpacity style={styles.memberInfo} onPress={() => onViewProfile(member.userID)}>
         <Image
-          source={{ uri: "https://randomuser.me/api/portraits/men/1.jpg" }}
+          source={{ uri: member.avatar || "https://randomuser.me/api/portraits/men/1.jpg" }}
           style={styles.memberAvatar}
           onError={(e) => console.log("Error loading avatar:", e.nativeEvent.error)}
         />
         <View>
-          <Text style={styles.memberName}>{member.userID}</Text>
+          <Text style={styles.memberName}>{member.username}</Text>
           <Text style={styles.memberRole}>{member.memberRole}</Text>
         </View>
       </TouchableOpacity>
@@ -56,7 +60,7 @@ export default function GroupDetail() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [groupName, setGroupName] = useState<string>("Nhóm không tên");
-  const [members, setMembers] = useState<GroupMember[]>([]);
+  const [members, setMembers] = useState<GroupMemberWithInfo[]>([]);
   const [membersCount, setMembersCount] = useState<number>(0);
   const [memberAvatars, setMemberAvatars] = useState<string[]>([]); // Lưu danh sách avatar của tối đa 4 thành viên
   const [currentUserID, setCurrentUserID] = useState<string | null>(null);
@@ -66,15 +70,26 @@ export default function GroupDetail() {
   const [showMembersModal, setShowMembersModal] = useState<boolean>(false);
   const [showAddMemberModal, setShowAddMemberModal] = useState<boolean>(false);
   const [newMemberID, setNewMemberID] = useState<string>("");
+  const [showTransferLeaderModal, setShowTransferLeaderModal] = useState(false);
+  const [selectedNewLeaderID, setSelectedNewLeaderID] = useState<string | null>(null);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [searchContact, setSearchContact] = useState<string>("");
+  const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
+  const [transferMode, setTransferMode] = useState<'leave' | 'manual'>('leave');
 
-  const fetchUserAvatar = async (userID: string): Promise<string> => {
+  const fetchUserAvatarAndName = async (userID: string): Promise<{ avatar: string; username: string }> => {
     try {
-      const response = await fetch(`http://3.95.192.17:3000/api/user/${userID}`);
-      const userData = await response.json();
-      return userData.avatar || "https://randomuser.me/api/portraits/men/1.jpg"; // Ảnh mặc định nếu không có avatar
+      const response = await api.get(`/api/user/${userID}`);
+      const userData = response.data;
+      return {
+        avatar: userData.avatar && userData.avatar.trim() !== "" ? userData.avatar : "https://randomuser.me/api/portraits/men/1.jpg",
+        username: userData.username || userID,
+      };
     } catch (error) {
-      console.error(`Lỗi khi lấy avatar của user ${userID}:`, error);
-      return "https://randomuser.me/api/portraits/men/1.jpg"; // Ảnh mặc định nếu lỗi
+      return {
+        avatar: "https://randomuser.me/api/portraits/men/1.jpg",
+        username: userID,
+      };
     }
   };
 
@@ -91,21 +106,40 @@ export default function GroupDetail() {
       }
 
       const groupMembers = await fetchGroupMembers(groupID);
-      setMembers(groupMembers);
       setMembersCount(groupMembers.length || 0);
 
-      // Lấy avatar của tối đa 4 thành viên đầu tiên
+      // Lấy avatar và username song song cho tất cả member
+      const infoPromises = groupMembers.map(member =>
+        fetchUserAvatarAndName(member.userID)
+          .then(info => info)
+          .catch(() => ({ avatar: "https://randomuser.me/api/portraits/men/1.jpg", username: member.userID }))
+      );
+      const infoResults = await Promise.allSettled(infoPromises);
+      const membersWithInfo = groupMembers.map((member, idx) => ({
+        ...member,
+        avatar:
+          infoResults[idx].status === "fulfilled"
+            ? infoResults[idx].value.avatar
+            : "https://randomuser.me/api/portraits/men/1.jpg",
+        username:
+          infoResults[idx].status === "fulfilled"
+            ? infoResults[idx].value.username
+            : member.userID,
+      }));
+      setMembers(membersWithInfo);
+
+      // Lấy avatar của tối đa 4 thành viên đầu tiên cho header
       const avatars: string[] = [];
-      for (let i = 0; i < Math.min(4, groupMembers.length); i++) {
-        const member = groupMembers[i];
-        const avatar = await fetchUserAvatar(member.userID);
-        avatars.push(avatar);
+      for (let i = 0; i < Math.min(4, membersWithInfo.length); i++) {
+        avatars.push(membersWithInfo[i].avatar);
       }
       setMemberAvatars(avatars);
 
       const currentMember = groupMembers.find((member) => member.userID === userID);
       if (currentMember && currentMember.memberRole === "LEADER") {
         setIsLeader(true);
+      } else {
+        setIsLeader(false);
       }
     } catch (error) {
       console.error("Lỗi khi lấy chi tiết nhóm:", error);
@@ -113,6 +147,16 @@ export default function GroupDetail() {
     } finally {
       setLoadingGroupName(false);
       setLoading(false);
+    }
+  };
+
+  const fetchContactsList = async () => {
+    if (!currentUserID) return;
+    try {
+      const res = await fetchContacts(currentUserID);
+      setContacts(res || []);
+    } catch (e) {
+      setContacts([]);
     }
   };
 
@@ -157,7 +201,7 @@ export default function GroupDetail() {
           style: "destructive",
           onPress: async () => {
             try {
-              const response = await kickMember(userID, groupID as string);
+              const response = await kickMember(currentUserID, userID, groupID as string);
               Alert.alert("Thành công", response);
               await fetchGroupDetails(currentUserID!, groupID as string);
             } catch (error: any) {
@@ -176,6 +220,41 @@ export default function GroupDetail() {
       return;
     }
 
+    // Nếu không còn là leader thì rời nhóm bình thường
+    if (!isLeader) {
+      Alert.alert(
+        "Xác nhận",
+        "Bạn có chắc chắn muốn rời nhóm này không?",
+        [
+          { text: "Hủy", style: "cancel" },
+          {
+            text: "Rời nhóm",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                const response = await leaveGroup(currentUserID, groupID as string);
+                Alert.alert("Thành công", response);
+                socket.emit("leaveGroupRoom", groupID);
+                router.replace("/home");
+              } catch (error: any) {
+                console.error("Lỗi khi rời nhóm:", error.message);
+                Alert.alert("Lỗi", `Không thể rời nhóm: ${error.message}`);
+              }
+            },
+          },
+        ]
+      );
+      return;
+    }
+
+    // Nếu là leader và nhóm còn nhiều hơn 1 thành viên
+    if (isLeader && members.length > 1) {
+      setTransferMode('leave');
+      setShowTransferLeaderModal(true);
+      return;
+    }
+
+    // Nếu là leader và chỉ còn 1 thành viên
     Alert.alert(
       "Xác nhận",
       "Bạn có chắc chắn muốn rời nhóm này không?",
@@ -198,6 +277,39 @@ export default function GroupDetail() {
         },
       ]
     );
+  };
+
+  // Hàm xác nhận chuyển quyền và rời nhóm cho leader
+  const handleTransferLeaderAndLeave = async () => {
+    if (!selectedNewLeaderID) {
+      Alert.alert("Vui lòng chọn thành viên để chuyển quyền leader.");
+      return;
+    }
+    try {
+      await new Promise((resolve, reject) => {
+        socket.emit("switchRole", currentUserID, selectedNewLeaderID, groupID, (response: string) => {
+          if (response.includes("Thành công")) resolve(response);
+          else reject(new Error(response));
+        });
+      });
+      if (transferMode === 'manual') {
+        Alert.alert("Thành công", "Đã chuyển quyền trưởng nhóm.");
+        setShowTransferLeaderModal(false);
+        setSelectedNewLeaderID(null);
+        await fetchGroupDetails(currentUserID!, groupID as string);
+      } else {
+        // Sau khi chuyển quyền thì rời nhóm
+        const response = await leaveGroup(currentUserID!, groupID as string);
+        Alert.alert("Thành công", response);
+        setShowTransferLeaderModal(false);
+        setSelectedNewLeaderID(null);
+        socket.emit("leaveGroupRoom", groupID);
+        router.replace("/home");
+      }
+    } catch (error: any) {
+      console.error("Lỗi khi chuyển quyền và rời nhóm:", error.message);
+      Alert.alert("Lỗi", `Không thể chuyển quyền: ${error.message}`);
+    }
   };
 
   const handleDeleteGroup = async () => {
@@ -407,19 +519,43 @@ export default function GroupDetail() {
 
       {/* Leave/Delete Group Buttons */}
       <View style={styles.footerButtons}>
-        <TouchableOpacity style={styles.actionButton} onPress={() => setShowAddMemberModal(true)}>
-          <Ionicons name="person-add-outline" size={24} color="#666" />
-          <Text style={styles.actionText}>Thêm thành viên</Text>
-        </TouchableOpacity>
+        {/* Nút Thêm thành viên: chỉ leader mới thấy */}
+        {isLeader && (
+          <TouchableOpacity style={styles.actionButton} onPress={() => {
+            setShowAddMemberModal(true);
+            fetchContactsList();
+          }}>
+            <Ionicons name="person-add-outline" size={24} color="#666" />
+            <Text style={styles.actionText}>Thêm thành viên</Text>
+          </TouchableOpacity>
+        )}
+        {/* Nút chuyển quyền trưởng nhóm: leader và nhóm >1 thành viên */}
+        {isLeader && members.length > 1 && (
+          <TouchableOpacity style={styles.actionButton} onPress={() => {
+            setTransferMode('manual');
+            setShowTransferLeaderModal(true);
+          }}>
+            <Ionicons name="swap-horizontal-outline" size={24} color="#666" />
+            <Text style={styles.actionText}>Chuyển quyền trưởng nhóm</Text>
+          </TouchableOpacity>
+        )}
+        {/* Các nút rời nhóm, xóa nhóm giữ nguyên vị trí sau */}
         {!isLeader && (
           <TouchableOpacity style={styles.leaveButton} onPress={handleLeaveGroup}>
             <Text style={styles.leaveButtonText}>Rời nhóm</Text>
           </TouchableOpacity>
         )}
         {isLeader && (
-          <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteGroup}>
-            <Text style={styles.deleteButtonText}>Xóa nhóm</Text>
-          </TouchableOpacity>
+          <View style={styles.leaderButtonRow}>
+            {members.length > 1 && (
+              <TouchableOpacity style={[styles.leaveButton, styles.leaderButton]} onPress={handleLeaveGroup}>
+                <Text style={styles.leaveButtonText}>Rời nhóm</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={[styles.deleteButton, styles.leaderButton, members.length > 1 && { marginLeft: 12 }]} onPress={handleDeleteGroup}>
+              <Text style={styles.deleteButtonText}>Xóa nhóm</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
 
@@ -465,22 +601,118 @@ export default function GroupDetail() {
       >
         <View style={styles.modalContainer}>
           <View style={styles.addMemberModal}>
-            <Text style={styles.modalTitle}>Thêm thành viên mới</Text>
+            <Text style={styles.modalTitle}>Chọn bạn bè để thêm vào nhóm</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Nhập userID của thành viên"
-              value={newMemberID}
-              onChangeText={setNewMemberID}
+              placeholder="Tìm kiếm theo tên"
+              value={searchContact}
+              onChangeText={setSearchContact}
+            />
+            <FlatList
+              data={contacts.filter(c =>
+                c.username.toLowerCase().includes(searchContact.toLowerCase()) &&
+                !members.some(m => m.userID === c.userID)
+              )}
+              keyExtractor={item => item.userID}
+              renderItem={({ item }) => {
+                const checked = selectedContacts.includes(item.userID);
+                return (
+                  <TouchableOpacity
+                    style={{ flexDirection: "row", alignItems: "center", padding: 10 }}
+                    onPress={() => {
+                      setSelectedContacts(prev =>
+                        prev.includes(item.userID)
+                          ? prev.filter(id => id !== item.userID)
+                          : [...prev, item.userID]
+                      );
+                    }}
+                  >
+                    <Image source={{ uri: item.avatar }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }} />
+                    <Text style={{ fontSize: 16, flex: 1 }}>{item.username}</Text>
+                    {checked && <Ionicons name="checkmark-circle" size={22} color="#007AFF" />}
+                  </TouchableOpacity>
+                );
+              }}
+              style={{ maxHeight: 250 }}
             />
             <View style={styles.modalButtonContainer}>
               <TouchableOpacity
                 style={styles.modalButton}
-                onPress={() => setShowAddMemberModal(false)}
+                onPress={() => {
+                  setShowAddMemberModal(false);
+                  setSearchContact("");
+                  setSelectedContacts([]);
+                }}
               >
                 <Text style={styles.modalButtonText}>Hủy</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.modalButton} onPress={handleAddMember}>
+              <TouchableOpacity
+                style={[styles.modalButton, { opacity: selectedContacts.length === 0 ? 0.5 : 1 }]}
+                disabled={selectedContacts.length === 0}
+                onPress={async () => {
+                  try {
+                    await Promise.all(selectedContacts.map(uid => addGroupMember(uid, groupID as string)));
+                    Alert.alert("Thành công", "Đã thêm thành viên vào nhóm");
+                    setShowAddMemberModal(false);
+                    setSearchContact("");
+                    setSelectedContacts([]);
+                    await fetchGroupDetails(currentUserID!, groupID as string);
+                  } catch (error: any) {
+                    Alert.alert("Lỗi", `Không thể thêm thành viên: ${error.message}`);
+                  }
+                }}
+              >
                 <Text style={styles.modalButtonText}>Thêm</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal chọn thành viên để chuyển quyền leader */}
+      <Modal
+        visible={showTransferLeaderModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowTransferLeaderModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.addMemberModal}>
+            <Text style={styles.modalTitle}>
+              {transferMode === 'manual' ? 'Chọn thành viên để chuyển quyền leader' : 'Chọn thành viên để chuyển quyền trước khi rời nhóm'}
+            </Text>
+            <FlatList
+              data={members.filter(m => m.userID !== currentUserID)}
+              keyExtractor={item => item.userID}
+              renderItem={({ item }: { item: GroupMemberWithInfo }) => (
+                <TouchableOpacity
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    padding: 10,
+                    backgroundColor: selectedNewLeaderID === item.userID ? "#e0e0e0" : "#fff",
+                    borderRadius: 8,
+                    marginBottom: 8,
+                  }}
+                  onPress={() => setSelectedNewLeaderID(item.userID)}
+                >
+                  <Image source={{ uri: item.avatar }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }} />
+                  <Text style={{ fontSize: 16 }}>{item.username}</Text>
+                  {selectedNewLeaderID === item.userID && (
+                    <Ionicons name="checkmark-circle" size={20} color="#007AFF" style={{ marginLeft: 10 }} />
+                  )}
+                </TouchableOpacity>
+              )}
+            />
+            <View style={styles.modalButtonContainer}>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => setShowTransferLeaderModal(false)}
+              >
+                <Text style={styles.modalButtonText}>Hủy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalButton} onPress={handleTransferLeaderAndLeave}>
+                <Text style={styles.modalButtonText}>Xác nhận</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -613,4 +845,17 @@ const styles = StyleSheet.create({
   memberName: { fontSize: 16, fontWeight: "bold" },
   memberRole: { fontSize: 14, color: "#666" },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  leaderButtonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 0,
+  },
+  leaderButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    padding: 15,
+  },
 });

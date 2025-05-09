@@ -20,16 +20,28 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fetchMessages, Message } from "../services/message";
-import { fetchUserGroups, fetchGroupMembers, GroupMember, Group } from "../services/group";
+import {
+  fetchUserGroups,
+  fetchGroupMembers,
+  GroupMember,
+  Group,
+} from "../services/group";
 import { fetchContacts, Contact } from "../services/contacts";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import { Audio, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import socket, { connectSocket, deleteMessage, recallMessage, registerSocketListeners, removeSocketListeners, joinGroup, joinGroupRoom } from "../services/socket";
+import socket, {
+  connectSocket,
+  deleteMessage,
+  recallMessage,
+  registerSocketListeners,
+  removeSocketListeners,
+  joinGroup,
+  joinGroupRoom,
+} from "../services/socket";
 import api from "../services/api";
-
 
 type SocketResponse =
   | "đang gửi"
@@ -57,7 +69,9 @@ type GroupMessage = Message & {
   isDelivered?: boolean;
 };
 
-type ForwardItem = { type: "contact"; data: Contact } | { type: "group"; data: Group };
+type ForwardItem =
+  | { type: "contact"; data: Contact }
+  | { type: "group"; data: Group };
 
 const MessageItem = ({
   item,
@@ -201,7 +215,9 @@ const MessageItem = ({
     </Modal>
   );
 
-  const isDeletedForUser = item.deleteStatusByUser?.includes(currentUserID || "");
+  const isDeletedForUser = item.deleteStatusByUser?.includes(
+    currentUserID || ""
+  );
   const isRecalled = item.recallStatus;
 
   const statusText = () => {
@@ -209,7 +225,10 @@ const MessageItem = ({
     if (othersSeen.length > 0) {
       return `Đã xem (${othersSeen.length})`;
     }
-    if (item.isDelivered) {
+    if ((item.seenStatus?.length || 0) > 0) {
+      return "Đã nhận";
+    }
+    if (item.isDelivered || (item.messageID && item.messageID.includes('-'))) {
       return "Đã nhận";
     }
     return "Đã gửi";
@@ -219,28 +238,35 @@ const MessageItem = ({
     <View
       style={[
         styles.messageContainer,
-        item.senderID === currentUserID ? styles.myMessage : styles.otherMessage,
+        item.senderID === currentUserID
+          ? styles.myMessage
+          : styles.otherMessage,
       ]}
     >
-      {item.senderID !== currentUserID && (
-        item.senderAvatar && item.senderAvatar.trim() !== "" ? (
+      {item.senderID !== currentUserID &&
+        (item.senderAvatar && item.senderAvatar.trim() !== "" ? (
           <Image
             source={{ uri: item.senderAvatar }}
             style={styles.avatar}
-            onError={(e) => console.log("Error loading avatar:", e.nativeEvent.error)}
+            onError={(e) =>
+              console.log("Error loading avatar:", e.nativeEvent.error)
+            }
           />
         ) : (
           <View style={styles.avatarPlaceholder} />
-        )
-      )}
+        ))}
       <View
         style={[
           styles.messageBoxWrapper,
-          item.senderID === currentUserID ? { flexDirection: "row-reverse" } : {},
+          item.senderID === currentUserID
+            ? { flexDirection: "row-reverse" }
+            : {},
         ]}
       >
         <View style={styles.messageBox}>
-          {isForwarded && <Text style={styles.forwardedLabel}>Đã chuyển tiếp</Text>}
+          {isForwarded && (
+            <Text style={styles.forwardedLabel}>Đã chuyển tiếp</Text>
+          )}
           {isRecalled ? (
             <Text style={styles.recalledMessage}>Tin nhắn đã được thu hồi</Text>
           ) : isDeletedForUser ? (
@@ -248,22 +274,25 @@ const MessageItem = ({
           ) : (
             <>
               {effectiveType === "type1" && (
-                <Text style={styles.messageText}>{item.context || "Tin nhắn trống"}</Text>
+                <Text style={styles.messageText}>
+                  {item.context || "Tin nhắn trống"}
+                </Text>
               )}
-              {effectiveType === "type2" && (
-                item.context === "Đang tải..." ? (
+              {effectiveType === "type2" &&
+                (item.context === "Đang tải..." ? (
                   <Text style={styles.loadingText}>Đang tải...</Text>
                 ) : item.context && item.context.trim() !== "" ? (
                   <Image
                     source={{ uri: item.context }}
                     style={styles.image}
                     resizeMode="cover"
-                    onError={(e) => console.log("Error loading image:", e.nativeEvent.error)}
+                    onError={(e) =>
+                      console.log("Error loading image:", e.nativeEvent.error)
+                    }
                   />
                 ) : (
                   <Text style={styles.errorText}>Không thể tải hình ảnh</Text>
-                )
-              )}
+                ))}
               {effectiveType === "type3" && (
                 <View style={styles.videoContainer}>
                   {error ? (
@@ -284,34 +313,42 @@ const MessageItem = ({
                   )}
                 </View>
               )}
-              {effectiveType === "type4" && (
-                item.context && item.context.trim() !== "" ? (
+              {effectiveType === "type4" &&
+                (item.context && item.context.trim() !== "" ? (
                   <Image
                     source={{ uri: item.context }}
                     style={styles.sticker}
                     resizeMode="contain"
-                    onError={(e) => console.log("Error loading sticker:", e.nativeEvent.error)}
+                    onError={(e) =>
+                      console.log("Error loading sticker:", e.nativeEvent.error)
+                    }
                   />
                 ) : (
                   <Text style={styles.errorText}>Không thể tải sticker</Text>
-                )
-              )}
-              {effectiveType === "type5" && (
-                item.context === "Đang tải..." ? (
+                ))}
+              {effectiveType === "type5" &&
+                (item.context === "Đang tải..." ? (
                   <Text style={styles.loadingText}>Đang tải...</Text>
                 ) : (
-                  <TouchableOpacity onPress={() => handleFilePress(item.context || "")}>
+                  <TouchableOpacity
+                    onPress={() => handleFilePress(item.context || "")}
+                  >
                     <View style={styles.fileContainer}>
-                      <Ionicons name="document-outline" size={24} color="#007AFF" />
+                      <Ionicons
+                        name="document-outline"
+                        size={24}
+                        color="#007AFF"
+                      />
                       <Text style={styles.fileText}>
-                        File: {(item.context || "file").split("/").pop() || "Không xác định"}
+                        File:{" "}
+                        {(item.context || "file").split("/").pop() ||
+                          "Không xác định"}
                       </Text>
                     </View>
                   </TouchableOpacity>
-                )
-              )}
-              {effectiveType === "type6" && (
-                item.context === "Đang tải..." ? (
+                ))}
+              {effectiveType === "type6" &&
+                (item.context === "Đang tải..." ? (
                   <Text style={styles.loadingText}>Đang tải...</Text>
                 ) : item.context && item.context.trim() !== "" ? (
                   <TouchableOpacity onPress={handlePlayVoice}>
@@ -325,12 +362,15 @@ const MessageItem = ({
                     </View>
                   </TouchableOpacity>
                 ) : (
-                  <Text style={styles.errorText}>Không thể tải tin nhắn thoại</Text>
-                )
-              )}
-              {item.senderID === currentUserID && !item.recallStatus && !isDeletedForUser && (
-                <Text style={styles.seenText}>{statusText()}</Text>
-              )}
+                  <Text style={styles.errorText}>
+                    Không thể tải tin nhắn thoại
+                  </Text>
+                ))}
+              {item.senderID === currentUserID &&
+                !item.recallStatus &&
+                !isDeletedForUser && (
+                  <Text style={styles.seenText}>{statusText()}</Text>
+                )}
             </>
           )}
         </View>
@@ -369,7 +409,9 @@ export default function GroupChat() {
   const [stickerSearchTerm, setStickerSearchTerm] = useState("funny");
   const [showForwardModal, setShowForwardModal] = useState(false);
   const [forwardMessageID, setForwardMessageID] = useState<string | null>(null);
-  const [selectedForwardItems, setSelectedForwardItems] = useState<string[]>([]);
+  const [selectedForwardItems, setSelectedForwardItems] = useState<string[]>(
+    []
+  );
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [pinnedMessageID, setPinnedMessageID] = useState<string | null>(null);
@@ -395,7 +437,10 @@ export default function GroupChat() {
 
   const convertFilePathToURL = (context: string): string => {
     const uploadsPath = getUploadsPath();
-    if (context && (context.startsWith("http://") || context.startsWith("https://"))) {
+    if (
+      context &&
+      (context.startsWith("http://") || context.startsWith("https://"))
+    ) {
       return context;
     }
     if (context && context.startsWith(uploadsPath)) {
@@ -408,7 +453,9 @@ export default function GroupChat() {
   const fetchStickers = async (term: string) => {
     try {
       const BASE_URL = "http://api.giphy.com/v1/stickers/search";
-      const res = await fetch(`${BASE_URL}?api_key=${GIPHY_API_KEY}&q=${term}&limit=10`);
+      const res = await fetch(
+        `${BASE_URL}?api_key=${GIPHY_API_KEY}&q=${term}&limit=10`
+      );
       const resJson = await res.json();
       setStickers(resJson.data);
     } catch (error) {
@@ -462,14 +509,10 @@ export default function GroupChat() {
     } catch (error) {
       console.error("Lỗi khi lấy chi tiết nhóm:", error);
       setGroupName("Nhóm không tên");
-      Alert.alert(
-        "Lỗi",
-        "Không thể tải chi tiết nhóm. Vui lòng thử lại.",
-        [
-          { text: "Hủy", style: "cancel" },
-          { text: "Thử lại", onPress: () => fetchGroupDetails(userID, groupID) },
-        ]
-      );
+      Alert.alert("Lỗi", "Không thể tải chi tiết nhóm. Vui lòng thử lại.", [
+        { text: "Hủy", style: "cancel" },
+        { text: "Thử lại", onPress: () => fetchGroupDetails(userID, groupID) },
+      ]);
     } finally {
       setLoadingGroupName(false);
     }
@@ -483,17 +526,25 @@ export default function GroupChat() {
       setGroups(userGroups);
     } catch (error) {
       console.error("Lỗi khi tải danh sách liên hệ và nhóm:", error);
-      Alert.alert("Lỗi", "Không thể tải danh sách để chuyển tiếp. Vui lòng thử lại.");
+      Alert.alert(
+        "Lỗi",
+        "Không thể tải danh sách để chuyển tiếp. Vui lòng thử lại."
+      );
     }
   };
 
-  const saveMessageStatus = async (messageID: string, status: "deleted" | "recalled") => {
+  const saveMessageStatus = async (
+    messageID: string,
+    status: "deleted" | "recalled"
+  ) => {
     try {
       const existingStatuses = await AsyncStorage.getItem("messageStatuses");
       const statuses = existingStatuses ? JSON.parse(existingStatuses) : {};
       statuses[messageID] = status;
       await AsyncStorage.setItem("messageStatuses", JSON.stringify(statuses));
-      console.log(`GroupChat.tsx: Saved message status - ${messageID}: ${status}`);
+      console.log(
+        `GroupChat.tsx: Saved message status - ${messageID}: ${status}`
+      );
     } catch (error) {
       console.error("Lỗi khi lưu trạng thái tin nhắn:", error);
     }
@@ -506,7 +557,9 @@ export default function GroupChat() {
         const statuses = JSON.parse(existingStatuses);
         delete statuses[messageID];
         await AsyncStorage.setItem("messageStatuses", JSON.stringify(statuses));
-        console.log(`GroupChat.tsx: Removed message status for messageID: ${messageID}`);
+        console.log(
+          `GroupChat.tsx: Removed message status for messageID: ${messageID}`
+        );
       }
     } catch (error) {
       console.error("Lỗi khi xóa trạng thái tin nhắn:", error);
@@ -547,7 +600,10 @@ export default function GroupChat() {
           }
 
           if (statuses[message.messageID!] === "deleted") {
-            message.deleteStatusByUser = [...(message.deleteStatusByUser || []), currentUserID!];
+            message.deleteStatusByUser = [
+              ...(message.deleteStatusByUser || []),
+              currentUserID!,
+            ];
           }
 
           return message;
@@ -574,7 +630,9 @@ export default function GroupChat() {
 
   const loadPinnedMessage = async (groupID: string) => {
     try {
-      const pinnedID = await AsyncStorage.getItem(`pinnedMessage_group_${groupID}`);
+      const pinnedID = await AsyncStorage.getItem(
+        `pinnedMessage_group_${groupID}`
+      );
       if (pinnedID) {
         setPinnedMessageID(pinnedID);
       }
@@ -583,7 +641,10 @@ export default function GroupChat() {
     }
   };
 
-  const savePinnedMessage = async (groupID: string, messageID: string | null) => {
+  const savePinnedMessage = async (
+    groupID: string,
+    messageID: string | null
+  ) => {
     try {
       if (messageID) {
         await AsyncStorage.setItem(`pinnedMessage_group_${groupID}`, messageID);
@@ -595,10 +656,13 @@ export default function GroupChat() {
     }
   };
 
-  const checkGroupMembership = async (userID: string, groupID: string): Promise<boolean> => {
+  const checkGroupMembership = async (
+    userID: string,
+    groupID: string
+  ): Promise<boolean> => {
     try {
       const groupMembers = await fetchGroupMembers(groupID);
-      return groupMembers.some(member => member.userID === userID);
+      return groupMembers.some((member) => member.userID === userID);
     } catch (error) {
       console.error("Lỗi khi kiểm tra thành viên nhóm:", error);
       return false;
@@ -610,26 +674,33 @@ export default function GroupChat() {
     onSuccess?: () => void,
     onFailure?: (error: any) => void
   ) => {
-    const messageExists = messages.some((msg) => msg.messageID === newMessage.messageID);
+    const messageExists = messages.some(
+      (msg) => msg.messageID === newMessage.messageID
+    );
     if (messageExists) {
-      console.log("GroupChat.tsx: Message already sent, skipping:", newMessage.messageID);
+      console.log(
+        "GroupChat.tsx: Message already sent, skipping:",
+        newMessage.messageID
+      );
       return;
     }
-  
+
     try {
       if (!socket.connected) {
-        console.log("GroupChat.tsx: Socket not connected, attempting to reconnect...");
+        console.log(
+          "GroupChat.tsx: Socket not connected, attempting to reconnect..."
+        );
         await connectSocket();
       }
-  
+
       const senderAvatar = await fetchUserAvatar(currentUserID!);
-      setMessages((prev) => [...prev, { ...newMessage, senderAvatar, isDelivered: false }]);
+      setMessages((prev) => [...prev, { ...newMessage, senderAvatar }]);
       if (isAtBottom) {
         scrollToBottom();
       } else {
         setShowScrollButton(true);
       }
-  
+
       return new Promise<void>((resolve, reject) => {
         socket.emit("sendMessage", newMessage, async (response: SocketResponse) => {
           console.log("GroupChat.tsx: Server response:", response);
@@ -649,29 +720,14 @@ export default function GroupChat() {
             reject(new Error(response));
           }
         });
-  
-        // Thêm timeout cho emit
-        setTimeout(() => {
-          if (!socket.connected) {
-            reject(new Error("Socket not connected after timeout"));
-          }
-        }, 5000);
       });
     } catch (error: any) {
       console.error("Error sending message:", error.message);
-      if (onFailure) onFailure(error);
-      Alert.alert(
-        "Lỗi",
-        `Không thể gửi tin nhắn: ${error.message}`,
-        [
-          { text: "Hủy", style: "cancel" },
-          {
-            text: "Thử lại",
-            onPress: () => sendMessage(newMessage, onSuccess, onFailure),
-          },
-        ]
+      setMessages((prev) =>
+        prev.filter((msg) => msg.messageID !== newMessage.messageID)
       );
-      throw error;
+      Alert.alert("Lỗi", `Không thể gửi tin nhắn: ${error.message}`);
+      if (onFailure) onFailure(error);
     }
   };
 
@@ -689,8 +745,14 @@ export default function GroupChat() {
               console.log("GroupChat.tsx: Join group room response:", response);
             }
           } catch (error: any) {
-            console.error("GroupChat.tsx: Failed to join group or room:", error.message);
-            Alert.alert("Lỗi", "Không thể tham gia nhóm hoặc phòng nhóm. Vui lòng thử lại.");
+            console.error(
+              "GroupChat.tsx: Failed to join group or room:",
+              error.message
+            );
+            Alert.alert(
+              "Lỗi",
+              "Không thể tham gia nhóm hoặc phòng nhóm. Vui lòng thử lại."
+            );
             router.back();
           }
         },
@@ -706,12 +768,17 @@ export default function GroupChat() {
         handler: async (message: GroupMessage) => {
           console.log("GroupChat.tsx: Received message:", message);
           if (message.groupID === groupID) {
-            const messageExists = messages.some((m) => m.messageID === message.messageID);
+            const messageExists = messages.some(
+              (m) => m.messageID === message.messageID
+            );
             if (messageExists) {
-              console.log("GroupChat.tsx: Message already exists, skipping:", message.messageID);
+              console.log(
+                "GroupChat.tsx: Message already exists, skipping:",
+                message.messageID
+              );
               return;
             }
-  
+
             if (
               message.messageTypeID === "type2" ||
               message.messageTypeID === "type3" ||
@@ -720,10 +787,10 @@ export default function GroupChat() {
             ) {
               message.context = convertFilePathToURL(message.context);
             }
-  
+
             const senderAvatar = await fetchUserAvatar(message.senderID);
             const newMessage = { ...message, senderAvatar, isDelivered: true };
-  
+
             setMessages((prev) => {
               const updatedMessages = [...prev, newMessage];
               if (isAtBottom) {
@@ -733,29 +800,33 @@ export default function GroupChat() {
               }
               return updatedMessages;
             });
-  
-            await AsyncStorage.setItem(`groupMessages_${groupID}`, JSON.stringify([...messages, newMessage]));
-  
-            socket.emit("updateUnreadCount", { groupID, userID: currentUserID });
+
+            await AsyncStorage.setItem(
+              `groupMessages_${groupID}`,
+              JSON.stringify([...messages, newMessage])
+            );
+
+            socket.emit("updateUnreadCount", {
+              groupID,
+              userID: currentUserID,
+            });
           }
         },
       },
       {
         event: "updateGroupChatSeenStatus",
-        handler: (data: { messageID: string; userID: string }) => {
-          console.log("GroupChat.tsx: Update seen status:", data);
-          if (data.userID !== currentUserID) {
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.messageID === data.messageID
-                  ? {
-                      ...msg,
-                      seenStatus: [...new Set([...(msg.seenStatus || []), data.userID])],
-                    }
-                  : msg
-              )
-            );
-          }
+        handler: (messageID: string, seenUserID: string) => {
+          console.log("GroupChat.tsx: Update seen status:", messageID, seenUserID, "currentUserID:", currentUserID);
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.messageID === messageID
+                ? {
+                    ...msg,
+                    seenStatus: [...new Set([...(msg.seenStatus || []), seenUserID])],
+                  }
+                : msg
+            )
+          );
         },
       },
       {
@@ -768,7 +839,10 @@ export default function GroupChat() {
                 msg.messageID === data.messageID
                   ? {
                       ...msg,
-                      deleteStatusByUser: [...(msg.deleteStatusByUser || []), data.userID],
+                      deleteStatusByUser: [
+                        ...(msg.deleteStatusByUser || []),
+                        data.userID,
+                      ],
                     }
                   : msg
               )
@@ -781,18 +855,15 @@ export default function GroupChat() {
         handler: (data: { messageID: string; userID: string }) => {
           console.log("GroupChat.tsx: Message recalled:", data);
           setMessages((prev) =>
-            prev.map((msg) =>
-              msg.messageID === data.messageID
-                ? { ...msg, recallStatus: true }
-                : msg
-            )
+            prev.filter((msg) => msg.messageID !== data.messageID)
           );
+          removeMessageStatus(data.messageID);
         },
       },
     ];
-  
+
     registerSocketListeners(listeners);
-  
+
     return () => {
       removeSocketListeners([
         "connect",
@@ -807,7 +878,7 @@ export default function GroupChat() {
 
   const initializeSocketAndData = async () => {
     setLoading(true);
-  
+
     try {
       if (!socket.connected) {
         await connectSocket();
@@ -826,31 +897,41 @@ export default function GroupChat() {
       setLoading(false);
       return;
     }
-  
+
     const userData = await AsyncStorage.getItem("user");
     console.log("GroupChat.tsx: Raw userData from AsyncStorage:", userData);
     if (!userData) {
       console.error("Không tìm thấy user trong AsyncStorage");
-      Alert.alert("Lỗi", "Không tìm thấy thông tin người dùng. Vui lòng đăng nhập lại.");
+      Alert.alert(
+        "Lỗi",
+        "Không tìm thấy thông tin người dùng. Vui lòng đăng nhập lại."
+      );
       router.replace("/login");
       setLoading(false);
       return;
     }
-  
+
     const user = JSON.parse(userData);
     console.log("GroupChat.tsx: Parsed user object:", user);
     const userIDValue = user?.userID;
     console.log("GroupChat.tsx: Extracted userIDValue:", userIDValue);
-    if (!userIDValue || typeof userIDValue !== "string" || userIDValue.trim() === "") {
+    if (
+      !userIDValue ||
+      typeof userIDValue !== "string" ||
+      userIDValue.trim() === ""
+    ) {
       console.error("currentUserID không hợp lệ:", userIDValue);
-      Alert.alert("Lỗi", "Thông tin người dùng không hợp lệ. Vui lòng đăng nhập lại.");
+      Alert.alert(
+        "Lỗi",
+        "Thông tin người dùng không hợp lệ. Vui lòng đăng nhập lại."
+      );
       await AsyncStorage.removeItem("user");
       router.replace("/login");
       setLoading(false);
       return;
     }
     setCurrentUserID(userIDValue);
-  
+
     if (!groupID || typeof groupID !== "string" || groupID.trim() === "") {
       console.error("groupID không hợp lệ:", groupID);
       Alert.alert("Lỗi", "Không thể tải nhóm chat. Vui lòng thử lại.");
@@ -858,7 +939,7 @@ export default function GroupChat() {
       setLoading(false);
       return;
     }
-  
+
     const isMember = await checkGroupMembership(userIDValue, groupID);
     if (!isMember) {
       console.error("User không phải là thành viên của nhóm");
@@ -867,9 +948,12 @@ export default function GroupChat() {
       setLoading(false);
       return;
     }
-  
+
     try {
-      console.log("GroupChat.tsx: Joining group:", { userID: userIDValue, groupID });
+      console.log("GroupChat.tsx: Joining group:", {
+        userID: userIDValue,
+        groupID,
+      });
       await joinGroup(userIDValue, groupID);
       console.log("GroupChat.tsx: Successfully joined group:", groupID);
     } catch (error: any) {
@@ -882,7 +966,7 @@ export default function GroupChat() {
         return;
       }
     }
-  
+
     await fetchGroupDetails(userIDValue, groupID);
     await loadMessagesWithCache(groupID);
     await loadForwardOptions(userIDValue);
@@ -935,30 +1019,56 @@ export default function GroupChat() {
           !markedAsSeen.has(msg.messageID || "")
       );
 
-      const unreadMessagesToMark = unreadMessages.filter(
-        (msg) => !markedAsSeen.has(msg.messageID || "")
-      );
-
-      if (unreadMessagesToMark.length > 0) {
-        console.log("GroupChat.tsx: Marking as seen:", unreadMessagesToMark.length, "messages");
-        for (const msg of unreadMessagesToMark) {
+      if (unreadMessages.length > 0) {
+        for (const msg of unreadMessages) {
           if (msg.messageID) {
-            socket.emit("seenGroupMessage", msg.messageID, currentUserID, groupID, (response: SocketResponse) => {
-              console.log("GroupChat.tsx: Seen response:", response);
-              if (response === "Đã cập nhật seenStatus chat nhóm") {
-                setMarkedAsSeen((prev) => new Set(prev).add(msg.messageID!));
-                socket.emit("updateUnreadCount", { groupID, userID: currentUserID });
+            socket.emit(
+              "seenMessage",
+              msg.messageID,
+              currentUserID,
+              (response: SocketResponse) => {
+                if (response === "Đã cập nhật seenStatus chat nhóm") {
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.messageID === msg.messageID
+                        ? {
+                            ...m,
+                            seenStatus: [
+                              ...(m.seenStatus || []),
+                              currentUserID,
+                            ],
+                            unread: false,
+                          }
+                        : m
+                    )
+                  );
+                  setMarkedAsSeen((prev) => new Set(prev).add(msg.messageID!));
+                  socket.emit("updateUnreadCount", {
+                    groupID,
+                    userID: currentUserID,
+                  });
+                }
               }
-            });
+            );
           }
         }
 
-        await AsyncStorage.setItem(`lastSeen_${groupID}`, new Date().toISOString());
+        await AsyncStorage.setItem(
+          `lastSeen_${groupID}`,
+          new Date().toISOString()
+        );
       }
     };
 
     markMessagesAsSeen();
   }, [currentUserID, groupID, messages]);
+
+  useEffect(() => {
+    if (socket && groupID) {
+      socket.emit("joinGroupRoom", groupID);
+      console.log("FE: joinGroupRoom", groupID);
+    }
+  }, [socket, groupID]);
 
   const handleSendMessage = async () => {
     if (loading) {
@@ -967,8 +1077,15 @@ export default function GroupChat() {
     }
 
     if (!inputText.trim() || !groupID || !currentUserID) {
-      console.log("GroupChat.tsx: Invalid input:", { inputText, groupID, currentUserID });
-      Alert.alert("Lỗi", "Không thể gửi tin nhắn: Thông tin không hợp lệ. Vui lòng đăng nhập lại.");
+      console.log("GroupChat.tsx: Invalid input:", {
+        inputText,
+        groupID,
+        currentUserID,
+      });
+      Alert.alert(
+        "Lỗi",
+        "Không thể gửi tin nhắn: Thông tin không hợp lệ. Vui lòng đăng nhập lại."
+      );
       return;
     }
 
@@ -990,21 +1107,19 @@ export default function GroupChat() {
         newMessage,
         () => setInputText(""),
         (error) => {
-          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-          Alert.alert(
-            "Lỗi",
-            `Không thể gửi tin nhắn: ${error.message}`,
-            [
-              { text: "Hủy", style: "cancel" },
-              {
-                text: "Thử lại",
-                onPress: () => {
-                  setInputText(newMessage.context);
-                  handleSendMessage();
-                },
-              },
-            ]
+          setMessages((prev) =>
+            prev.filter((msg) => msg.messageID !== messageID)
           );
+          Alert.alert("Lỗi", `Không thể gửi tin nhắn: ${error.message}`, [
+            { text: "Hủy", style: "cancel" },
+            {
+              text: "Thử lại",
+              onPress: () => {
+                setInputText(newMessage.context);
+                handleSendMessage();
+              },
+            },
+          ]);
         }
       );
     } catch (error: any) {
@@ -1103,14 +1218,12 @@ export default function GroupChat() {
         file: { name: `image-${Date.now()}.jpg`, data: fileBase64 },
       };
 
-      await sendMessage(
-        newMessage,
-        undefined,
-        (error) => {
-          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-          Alert.alert("Lỗi", `Không thể gửi ảnh: ${error.message}`);
-        }
-      );
+      await sendMessage(newMessage, undefined, (error) => {
+        setMessages((prev) =>
+          prev.filter((msg) => msg.messageID !== messageID)
+        );
+        Alert.alert("Lỗi", `Không thể gửi ảnh: ${error.message}`);
+      });
     } catch (error: any) {
       console.error("Lỗi khi gửi ảnh:", error.message);
     }
@@ -1171,21 +1284,22 @@ export default function GroupChat() {
         file: { name: `video-${Date.now()}.mp4`, data: fileBase64 },
       };
 
-      await sendMessage(
-        newMessage,
-        undefined,
-        (error) => {
-          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-          Alert.alert("Lỗi", `Không thể gửi video: ${error.message}`);
-        }
-      );
+      await sendMessage(newMessage, undefined, (error) => {
+        setMessages((prev) =>
+          prev.filter((msg) => msg.messageID !== messageID)
+        );
+        Alert.alert("Lỗi", `Không thể gửi video: ${error.message}`);
+      });
     } catch (error: any) {
       console.error("Lỗi khi gửi video:", error.message);
     }
   };
 
   const handleSendFile = async () => {
-    const result = await DocumentPicker.getDocumentAsync({ type: "*/*", copyToCacheDirectory: true });
+    const result = await DocumentPicker.getDocumentAsync({
+      type: "*/*",
+      copyToCacheDirectory: true,
+    });
     if (result.canceled) return;
 
     const file = result.assets[0];
@@ -1222,14 +1336,12 @@ export default function GroupChat() {
         file: { name: fileName, data: fileBase64 },
       };
 
-      await sendMessage(
-        newMessage,
-        undefined,
-        (error) => {
-          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-          Alert.alert("Lỗi", `Không thể gửi file: ${error.message}`);
-        }
-      );
+      await sendMessage(newMessage, undefined, (error) => {
+        setMessages((prev) =>
+          prev.filter((msg) => msg.messageID !== messageID)
+        );
+        Alert.alert("Lỗi", `Không thể gửi file: ${error.message}`);
+      });
     } catch (error: any) {
       console.error("Lỗi khi gửi file:", error.message);
     }
@@ -1271,7 +1383,9 @@ export default function GroupChat() {
       });
 
       const newRecording = new Audio.Recording();
-      await newRecording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await newRecording.prepareToRecordAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
       await newRecording.startAsync();
       setRecording(newRecording);
       setIsRecording(true);
@@ -1333,14 +1447,12 @@ export default function GroupChat() {
         file: { name: `voice-${Date.now()}.m4a`, data: fileBase64 },
       };
 
-      await sendMessage(
-        newMessage,
-        undefined,
-        (error) => {
-          setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
-          Alert.alert("Lỗi", `Không thể gửi tin nhắn thoại: ${error.message}`);
-        }
-      );
+      await sendMessage(newMessage, undefined, (error) => {
+        setMessages((prev) =>
+          prev.filter((msg) => msg.messageID !== messageID)
+        );
+        Alert.alert("Lỗi", `Không thể gửi tin nhắn thoại: ${error.message}`);
+      });
     } catch (error: any) {
       console.error("Lỗi khi gửi tin nhắn thoại:", error.message);
     } finally {
@@ -1356,7 +1468,13 @@ export default function GroupChat() {
       setMessages((prev) =>
         prev.map((msg) =>
           msg.messageID === messageID
-            ? { ...msg, deleteStatusByUser: [...(msg.deleteStatusByUser || []), currentUserID] }
+            ? {
+                ...msg,
+                deleteStatusByUser: [
+                  ...(msg.deleteStatusByUser || []),
+                  currentUserID,
+                ],
+              }
             : msg
         )
       );
@@ -1364,10 +1482,19 @@ export default function GroupChat() {
       await deleteMessage(messageID, currentUserID);
       const updatedMessages = messages.map((msg) =>
         msg.messageID === messageID
-          ? { ...msg, deleteStatusByUser: [...(msg.deleteStatusByUser || []), currentUserID] }
+          ? {
+              ...msg,
+              deleteStatusByUser: [
+                ...(msg.deleteStatusByUser || []),
+                currentUserID,
+              ],
+            }
           : msg
       );
-      await AsyncStorage.setItem(`groupMessages_${groupID}`, JSON.stringify(updatedMessages));
+      await AsyncStorage.setItem(
+        `groupMessages_${groupID}`,
+        JSON.stringify(updatedMessages)
+      );
       Alert.alert("Thành công", "Đã xóa tin nhắn");
     } catch (error) {
       console.error("Lỗi khi xóa tin nhắn:", error);
@@ -1380,17 +1507,16 @@ export default function GroupChat() {
     if (!currentUserID || !messageID) return;
 
     try {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.messageID === messageID ? { ...msg, recallStatus: true } : msg
-        )
-      );
+      setMessages((prev) => prev.filter((msg) => msg.messageID !== messageID));
       await removeMessageStatus(messageID);
       await recallMessage(messageID, currentUserID);
-      const updatedMessages = messages.map((msg) =>
-        msg.messageID === messageID ? { ...msg, recallStatus: true } : msg
+      const updatedMessages = messages.filter(
+        (msg) => msg.messageID !== messageID
       );
-      await AsyncStorage.setItem(`groupMessages_${groupID}`, JSON.stringify(updatedMessages));
+      await AsyncStorage.setItem(
+        `groupMessages_${groupID}`,
+        JSON.stringify(updatedMessages)
+      );
       Alert.alert("Thành công", "Đã thu hồi tin nhắn");
     } catch (error) {
       console.error("Lỗi khi thu hồi tin nhắn:", error);
@@ -1412,8 +1538,15 @@ export default function GroupChat() {
   };
 
   const handleShareMessages = () => {
-    if (!forwardMessageID || !currentUserID || selectedForwardItems.length === 0) {
-      Alert.alert("Lỗi", "Vui lòng chọn ít nhất một người hoặc nhóm để chuyển tiếp.");
+    if (
+      !forwardMessageID ||
+      !currentUserID ||
+      selectedForwardItems.length === 0
+    ) {
+      Alert.alert(
+        "Lỗi",
+        "Vui lòng chọn ít nhất một người hoặc nhóm để chuyển tiếp."
+      );
       return;
     }
 
@@ -1428,9 +1561,19 @@ export default function GroupChat() {
           groupID: isGroup ? id : null,
         },
         (response: string) => {
-          console.log("GroupChat.tsx: Server response for shareMessage to", id, ":", response);
+          console.log(
+            "GroupChat.tsx: Server response for shareMessage to",
+            id,
+            ":",
+            response
+          );
           if (response !== "Đã nhận") {
-            Alert.alert("Lỗi", `Không thể chuyển tiếp đến ${isGroup ? "nhóm" : "người"} ${id}: ${response}`);
+            Alert.alert(
+              "Lỗi",
+              `Không thể chuyển tiếp đến ${
+                isGroup ? "nhóm" : "người"
+              } ${id}: ${response}`
+            );
           }
         }
       );
@@ -1470,13 +1613,19 @@ export default function GroupChat() {
     }
   }, []);
 
-  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    const paddingToBottom = 20;
-    const currentIsAtBottom = contentSize.height - contentOffset.y - layoutMeasurement.height < paddingToBottom;
-    setIsAtBottom(currentIsAtBottom);
-    setShowScrollButton(!currentIsAtBottom);
-  }, []);
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } =
+        event.nativeEvent;
+      const paddingToBottom = 20;
+      const currentIsAtBottom =
+        contentSize.height - contentOffset.y - layoutMeasurement.height <
+        paddingToBottom;
+      setIsAtBottom(currentIsAtBottom);
+      setShowScrollButton(!currentIsAtBottom);
+    },
+    []
+  );
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -1504,8 +1653,14 @@ export default function GroupChat() {
 
   const renderPinnedMessage = () => {
     if (!pinnedMessageID) return null;
-    const pinnedMessage = messages.find((msg) => msg.messageID === pinnedMessageID);
-    if (!pinnedMessage || pinnedMessage.recallStatus || pinnedMessage.deleteStatusByUser?.includes(currentUserID!)) {
+    const pinnedMessage = messages.find(
+      (msg) => msg.messageID === pinnedMessageID
+    );
+    if (
+      !pinnedMessage ||
+      pinnedMessage.recallStatus ||
+      pinnedMessage.deleteStatusByUser?.includes(currentUserID!)
+    ) {
       setPinnedMessageID(null);
       savePinnedMessage(groupID as string, null);
       return null;
@@ -1540,13 +1695,23 @@ export default function GroupChat() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.navbar, { paddingTop: Platform.OS === "ios" ? insets.top : 10, paddingBottom: 10 }]}>
+      <View
+        style={[
+          styles.navbar,
+          {
+            paddingTop: Platform.OS === "ios" ? insets.top : 10,
+            paddingBottom: 10,
+          },
+        ]}
+      >
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.groupNameContainer}
-          onPress={() => router.push({ pathname: "/group_detail", params: { groupID } })}
+          onPress={() =>
+            router.push({ pathname: "/group_detail", params: { groupID } })
+          }
         >
           <View style={styles.groupAvatarContainer}>
             <View style={styles.avatarWrapper}>
@@ -1555,14 +1720,24 @@ export default function GroupChat() {
                   <Image
                     source={{ uri: memberAvatars[0] }}
                     style={[styles.groupAvatar, { zIndex: 4 }]}
-                    onError={(e) => console.log("Error loading avatar 0:", e.nativeEvent.error)}
+                    onError={(e) =>
+                      console.log(
+                        "Error loading avatar 0:",
+                        e.nativeEvent.error
+                      )
+                    }
                   />
                 )}
                 {memberAvatars[1] && (
                   <Image
                     source={{ uri: memberAvatars[1] }}
                     style={[styles.groupAvatar, { marginLeft: -15, zIndex: 3 }]}
-                    onError={(e) => console.log("Error loading avatar 1:", e.nativeEvent.error)}
+                    onError={(e) =>
+                      console.log(
+                        "Error loading avatar 1:",
+                        e.nativeEvent.error
+                      )
+                    }
                   />
                 )}
               </View>
@@ -1571,22 +1746,27 @@ export default function GroupChat() {
                   <Image
                     source={{ uri: memberAvatars[2] }}
                     style={[styles.groupAvatar, { zIndex: 2 }]}
-                    onError={(e) => console.log("Error loading avatar 2:", e.nativeEvent.error)}
+                    onError={(e) =>
+                      console.log(
+                        "Error loading avatar 2:",
+                        e.nativeEvent.error
+                      )
+                    }
                   />
                 )}
                 {memberAvatars[3] && (
                   <Image
                     source={{ uri: memberAvatars[3] }}
                     style={[styles.groupAvatar, { marginLeft: -15, zIndex: 1 }]}
-                    onError={(e) => console.log("Error loading avatar 3:", e.nativeEvent.error)}
+                    onError={(e) =>
+                      console.log(
+                        "Error loading avatar 3:",
+                        e.nativeEvent.error
+                      )
+                    }
                   />
                 )}
               </View>
-            </View>
-            <View style={[styles.membersCountBadge, { marginLeft: -15, zIndex: 0 }]}>
-              <Text style={styles.membersCountText}>
-                {membersCount >= 9 ? "9+" : membersCount}
-              </Text>
             </View>
           </View>
           <View style={styles.groupInfo}>
@@ -1596,20 +1776,41 @@ export default function GroupChat() {
               <>
                 <Text style={styles.groupName}>{groupName}</Text>
                 <View style={styles.groupDetails}>
-                  <Ionicons name="people-outline" size={16} color="#fff" style={styles.groupDetailIcon} />
-                  <Text style={styles.groupDetailText}>{membersCount} thành viên</Text>
+                  <Ionicons
+                    name="people-outline"
+                    size={16}
+                    color="#fff"
+                    style={styles.groupDetailIcon}
+                  />
+                  <Text style={styles.groupDetailText}>
+                    {membersCount} thành viên
+                  </Text>
                 </View>
               </>
             )}
           </View>
         </TouchableOpacity>
         <TouchableOpacity>
-          <Ionicons name="call-outline" size={24} color="#fff" style={styles.icon} />
+          <Ionicons
+            name="call-outline"
+            size={24}
+            color="#fff"
+            style={styles.icon}
+          />
         </TouchableOpacity>
         <TouchableOpacity>
-          <Ionicons name="videocam-outline" size={24} color="#fff" style={styles.icon} />
+          <Ionicons
+            name="videocam-outline"
+            size={24}
+            color="#fff"
+            style={styles.icon}
+          />
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.push({ pathname: "/group_detail", params: { groupID } })}>
+        <TouchableOpacity
+          onPress={() =>
+            router.push({ pathname: "/group_detail", params: { groupID } })
+          }
+        >
           <Ionicons name="ellipsis-vertical" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
@@ -1619,7 +1820,9 @@ export default function GroupChat() {
         <FlatList
           ref={flatListRef}
           data={messages}
-          keyExtractor={(item, index) => item.messageID ?? `${item.createdAt}-${index}`}
+          keyExtractor={(item, index) =>
+            item.messageID ?? `${item.createdAt}-${index}`
+          }
           renderItem={renderItem}
           contentContainerStyle={{
             padding: 10,
@@ -1654,13 +1857,28 @@ export default function GroupChat() {
           <Ionicons name="happy-outline" size={24} color="#666" />
         </TouchableOpacity>
         <TouchableOpacity onPress={handleSendImage}>
-          <Ionicons name="image-outline" size={24} color="#666" style={{ marginLeft: 10 }} />
+          <Ionicons
+            name="image-outline"
+            size={24}
+            color="#666"
+            style={{ marginLeft: 10 }}
+          />
         </TouchableOpacity>
         <TouchableOpacity onPress={handleSendVideo}>
-          <Ionicons name="videocam-outline" size={24} color="#666" style={{ marginLeft: 10 }} />
+          <Ionicons
+            name="videocam-outline"
+            size={24}
+            color="#666"
+            style={{ marginLeft: 10 }}
+          />
         </TouchableOpacity>
         <TouchableOpacity onPress={handleSendFile}>
-          <Ionicons name="document-outline" size={24} color="#666" style={{ marginLeft: 10 }} />
+          <Ionicons
+            name="document-outline"
+            size={24}
+            color="#666"
+            style={{ marginLeft: 10 }}
+          />
         </TouchableOpacity>
         <TouchableOpacity
           onPressIn={handleStartRecording}
@@ -1703,7 +1921,9 @@ export default function GroupChat() {
               keyExtractor={(item) => item.id}
               numColumns={3}
               renderItem={({ item }) => (
-                <Pressable onPress={() => handleSendSticker(item.images.original.url)}>
+                <Pressable
+                  onPress={() => handleSendSticker(item.images.original.url)}
+                >
                   <Image
                     source={{ uri: item.images.original.url }}
                     style={styles.stickerThumbnail}
@@ -1712,7 +1932,10 @@ export default function GroupChat() {
                 </Pressable>
               )}
             />
-            <TouchableOpacity style={styles.closeButton} onPress={() => setShowStickerPicker(false)}>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => setShowStickerPicker(false)}
+            >
               <Text style={styles.closeButtonText}>Đóng</Text>
             </TouchableOpacity>
           </View>
@@ -1734,10 +1957,15 @@ export default function GroupChat() {
                 ...groups.map((g) => ({ type: "group" as const, data: g })),
               ].slice(0, 50)}
               keyExtractor={(item: ForwardItem) =>
-                item.type === "contact" ? `contact-${item.data.userID}` : `group-${item.data.groupID}`
+                item.type === "contact"
+                  ? `contact-${item.data.userID}`
+                  : `group-${item.data.groupID}`
               }
               renderItem={({ item }: { item: ForwardItem }) => {
-                const id = item.type === "contact" ? item.data.userID : item.data.groupID;
+                const id =
+                  item.type === "contact"
+                    ? item.data.userID
+                    : item.data.groupID;
                 const isSelected = selectedForwardItems.includes(id);
                 return (
                   <Pressable
@@ -1759,8 +1987,13 @@ export default function GroupChat() {
                       <View style={styles.forwardAvatarPlaceholder} />
                     )}
                     <Text style={styles.forwardItemText}>
-                      {item.type === "contact" ? item.data.username : item.data.groupName}
-                      {item.type === "contact" && item.data.userID === currentUserID ? " (Bạn)" : ""}
+                      {item.type === "contact"
+                        ? item.data.username
+                        : item.data.groupName}
+                      {item.type === "contact" &&
+                      item.data.userID === currentUserID
+                        ? " (Bạn)"
+                        : ""}
                     </Text>
                   </Pressable>
                 );
@@ -1786,7 +2019,7 @@ export default function GroupChat() {
       </Modal>
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {

@@ -118,9 +118,9 @@ export const deleteGroup = (userID: string, groupID: string): Promise<string> =>
 };
 
 // Hàm kick thành viên
-export const kickMember = (userID: string, groupID: string): Promise<string> => {
+export const kickMember = (leaderID: string, userID: string, groupID: string): Promise<string> => {
   return new Promise((resolve, reject) => {
-    socket.emit("kickMember", { userID, groupID }, (response: string) => {
+    socket.emit("kickMember", leaderID, userID, groupID, (response: string) => {
       if (response.includes("Thành công")) {
         resolve(response);
       } else {
@@ -133,7 +133,7 @@ export const kickMember = (userID: string, groupID: string): Promise<string> => 
 // Hàm rời nhóm
 export const leaveGroup = (userID: string, groupID: string): Promise<string> => {
   return new Promise((resolve, reject) => {
-    socket.emit("leaveGroup", { userID, groupID }, (response: string) => {
+    socket.emit("leaveGroup", userID, groupID, (response: string) => {
       if (response.includes("Thành công")) {
         resolve(response);
       } else {
@@ -141,6 +141,30 @@ export const leaveGroup = (userID: string, groupID: string): Promise<string> => 
       }
     });
   });
+};
+
+export const leaderLeaveGroup = async (
+  leaderID: string,
+  groupID: string,
+  newLeaderID: string
+): Promise<string> => {
+  // 1. Chuyển quyền
+  await new Promise<string>((resolve, reject) => {
+    socket.emit("switchRole", leaderID, newLeaderID, groupID, (response: string) => {
+      if (response.includes("Thành công")) resolve(response);
+      else reject(new Error(response));
+    });
+  });
+
+  // 2. Rời nhóm
+  await new Promise<string>((resolve, reject) => {
+    socket.emit("leaveGroup", leaderID, groupID, (response: string) => {
+      if (response.includes("Thành công")) resolve(response);
+      else reject(new Error(response));
+    });
+  });
+
+  return "Chuyển quyền và rời nhóm thành công";
 };
 
 export const disconnectSocket = () => {

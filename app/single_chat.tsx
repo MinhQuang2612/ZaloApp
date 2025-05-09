@@ -53,6 +53,8 @@ type GiphySticker = {
 
 type ForwardItem = { type: "contact"; data: Contact } | { type: "group"; data: Group };
 
+type MessageWithDelivered = Message & { delivered?: boolean };
+
 const MessageItem = ({
   item,
   currentUserID,
@@ -62,7 +64,7 @@ const MessageItem = ({
   onForwardMessage,
   onPinMessage,
 }: {
-  item: Message;
+  item: MessageWithDelivered;
   currentUserID: string | null;
   userID: string | undefined;
   onDeleteMessage: (messageID: string) => void;
@@ -334,7 +336,7 @@ const MessageItem = ({
           )}
           {item.senderID === currentUserID && !item.recallStatus && !item.deleteStatusByUser?.includes(currentUserID!) && (
             <Text style={styles.seenText}>
-              {item.seenStatus?.includes(userID!) ? "Đã xem" : "Đã gửi"}
+              {item.seenStatus?.includes(userID!) ? "Đã xem" : item.delivered ? "Đã nhận" : "Đã gửi"}
             </Text>
           )}
         </View>
@@ -362,7 +364,7 @@ const determineMessageType = (message: Message): string => {
 export default function Chat() {
   const { userID } = useLocalSearchParams<{ userID?: string }>();
   const router = useRouter();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<MessageWithDelivered[]>([]);
   const [inputText, setInputText] = useState("");
   const [currentUserID, setCurrentUserID] = useState<string | null>(null);
   const [receiverName, setReceiverName] = useState<string>("Đang tải...");
@@ -524,7 +526,11 @@ export default function Chat() {
                 ) {
                   message.context = convertFilePathToURL(message.context);
                 }
-                updatedMessages[existingIndex] = message;
+                if (message.senderID === currentUserID && message.receiverID === userID) {
+                  updatedMessages[existingIndex] = { ...message, delivered: true };
+                } else {
+                  updatedMessages[existingIndex] = message;
+                }
                 setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
                 return updatedMessages;
               } else {
@@ -536,9 +542,15 @@ export default function Chat() {
                 ) {
                   message.context = convertFilePathToURL(message.context);
                 }
-                const newMessages = [...prev, message];
-                setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-                return newMessages;
+                if (message.senderID === currentUserID && message.receiverID === userID) {
+                  const newMessages = [...prev, { ...message, delivered: true }];
+                  setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+                  return newMessages;
+                } else {
+                  const newMessages = [...prev, message];
+                  setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+                  return newMessages;
+                }
               }
             });
           }
