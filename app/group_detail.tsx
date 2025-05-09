@@ -167,7 +167,7 @@ export default function GroupDetail() {
     }
 
     try {
-      const userCheckResponse = await fetch(`http://3.95.192.17:3000/api/user/${newMemberID}`);
+      const userCheckResponse = await fetch(`http://44.210.125.160:3000/api/user/${newMemberID}`);
       const userCheckData = await userCheckResponse.json();
       if (!userCheckData) {
         Alert.alert("Lỗi", "User không tồn tại.");
@@ -282,33 +282,66 @@ export default function GroupDetail() {
   // Hàm xác nhận chuyển quyền và rời nhóm cho leader
   const handleTransferLeaderAndLeave = async () => {
     if (!selectedNewLeaderID) {
-      Alert.alert("Vui lòng chọn thành viên để chuyển quyền leader.");
+      console.log("Không có selectedNewLeaderID");
+      Alert.alert("Lỗi", "Vui lòng chọn thành viên để chuyển quyền leader.");
       return;
     }
     try {
-      await new Promise((resolve, reject) => {
+      console.log(`Gửi switchRole: currentUserID=${currentUserID}, selectedNewLeaderID=${selectedNewLeaderID}, groupID=${groupID}`);
+      const response = await new Promise<string>((resolve, reject) => {
         socket.emit("switchRole", currentUserID, selectedNewLeaderID, groupID, (response: string) => {
-          if (response.includes("Thành công")) resolve(response);
-          else reject(new Error(response));
+          console.log(`Phản hồi từ switchRole: ${response}`);
+          // Chấp nhận cả "Thành công" và "Thay đổi quyền LEADER thành công" là thành công
+          if (response.includes("Thành công") || response === "Thay đổi quyền LEADER thành công") {
+            resolve(response);
+          } else {
+            reject(new Error(response));
+          }
         });
       });
+      console.log(`switchRole thành công: ${response}`);
+  
       if (transferMode === 'manual') {
         Alert.alert("Thành công", "Đã chuyển quyền trưởng nhóm.");
         setShowTransferLeaderModal(false);
         setSelectedNewLeaderID(null);
         await fetchGroupDetails(currentUserID!, groupID as string);
       } else {
-        // Sau khi chuyển quyền thì rời nhóm
-        const response = await leaveGroup(currentUserID!, groupID as string);
-        Alert.alert("Thành công", response);
+        console.log(`Rời nhóm sau khi chuyển quyền: userID=${currentUserID}, groupID=${groupID}`);
+        const leaveResponse = await leaveGroup(currentUserID!, groupID as string);
+        Alert.alert("Thành công", leaveResponse);
         setShowTransferLeaderModal(false);
         setSelectedNewLeaderID(null);
         socket.emit("leaveGroupRoom", groupID);
         router.replace("/home");
       }
     } catch (error: any) {
-      console.error("Lỗi khi chuyển quyền và rời nhóm:", error.message);
-      Alert.alert("Lỗi", `Không thể chuyển quyền: ${error.message}`);
+      console.error("Lỗi trong handleTransferLeaderAndLeave:", error.message);
+      // Chỉ hiển thị thông báo lỗi nếu không phải là phản hồi thành công
+      if (error.message === "Thay đổi quyền LEADER thành công") {
+        // Xử lý như trường hợp thành công
+        if (transferMode === 'manual') {
+          Alert.alert("Thành công", "Đã chuyển quyền trưởng nhóm.");
+          setShowTransferLeaderModal(false);
+          setSelectedNewLeaderID(null);
+          await fetchGroupDetails(currentUserID!, groupID as string);
+        } else {
+          try {
+            console.log(`Rời nhóm sau khi chuyển quyền: userID=${currentUserID}, groupID=${groupID}`);
+            const leaveResponse = await leaveGroup(currentUserID!, groupID as string);
+            Alert.alert("Thành công", leaveResponse);
+            setShowTransferLeaderModal(false);
+            setSelectedNewLeaderID(null);
+            socket.emit("leaveGroupRoom", groupID);
+            router.replace("/home");
+          } catch (leaveError: any) {
+            console.error("Lỗi khi rời nhóm:", leaveError.message);
+            Alert.alert("Lỗi", `Không thể rời nhóm: ${leaveError.message}`);
+          }
+        }
+      } else {
+        Alert.alert("Lỗi", `Không thể chuyển quyền: ${error.message}`);
+      }
     }
   };
 
