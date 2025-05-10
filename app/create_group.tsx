@@ -86,14 +86,9 @@ export default function CreateGroup() {
     setLoading(true);
     try {
       const userData = await AsyncStorage.getItem("user");
-      if (!userData) {
-        Alert.alert("Lỗi", "Không tìm thấy thông tin người dùng.");
-        router.replace("/login");
-        return;
-      }
-
-      const user = JSON.parse(userData);
-      const userID = user.userID;
+      const user = userData ? JSON.parse(userData) : null;
+      const userID = user?.userID;
+      const username = user?.username || userID;
       if (!userID) {
         Alert.alert("Lỗi", "Không tìm thấy userID.");
         router.replace("/login");
@@ -141,12 +136,21 @@ export default function CreateGroup() {
       // Hiển thị danh sách thành viên trong thông báo
       let memberNames = "Không lấy được danh sách thành viên.";
       if (members.length > 0) {
-        memberNames = members
-          .map((member: { userID: string }) => {
-            const contact = contacts.find((c) => c.userID === member.userID);
-            return contact?.username || member.userID;
-          })
-          .join(", ");
+        // Lấy tên cho từng thành viên, nếu không có trong contacts thì gọi API
+        const getMemberName = async (memberID: string) => {
+          if (memberID === userID && username) return username;
+          const contact = contacts.find((c) => c.userID === memberID);
+          if (contact) return contact.username;
+          try {
+            const res = await api.get(`/api/user/${memberID}`);
+            return res.data.username || memberID;
+          } catch {
+            return memberID;
+          }
+        };
+        // Đợi lấy tên cho tất cả thành viên
+        const names = await Promise.all(members.map((m: { userID: string }) => getMemberName(m.userID)));
+        memberNames = names.join(", ");
       }
 
       if (failedMembers.length > 0) {

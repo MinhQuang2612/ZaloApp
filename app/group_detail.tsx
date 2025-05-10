@@ -194,9 +194,13 @@ export default function GroupDetail() {
       return;
     }
 
+    // Tìm username từ danh sách members
+    const member = members.find(m => m.userID === userID);
+    const displayName = member?.username || userID;
+
     Alert.alert(
       "Xác nhận",
-      `Bạn có chắc chắn muốn kick thành viên ${userID} khỏi nhóm không?`,
+      `Bạn có chắc chắn muốn kick thành viên ${displayName} khỏi nhóm không?`,
       [
         { text: "Hủy", style: "cancel" },
         {

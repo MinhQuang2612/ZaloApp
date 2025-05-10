@@ -16,7 +16,7 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fetchMessages, Message } from "../services/message";
@@ -1069,6 +1069,66 @@ export default function GroupChat() {
       console.log("FE: joinGroupRoom", groupID);
     }
   }, [socket, groupID]);
+
+  useEffect(() => {
+    if (!currentUserID || !groupID) return;
+
+    // Lắng nghe các sự kiện cập nhật nhóm
+    const handleGroupUpdate = () => {
+      fetchGroupDetails(currentUserID, groupID);
+    };
+
+    // Thành viên mới được thêm vào nhóm
+    socket.on("newMember", (userID: string) => {
+      handleGroupUpdate();
+    });
+
+    // Thành viên bị kick khỏi nhóm
+    socket.on("memberKicked", ({ userID, groupID: kickedGroupID }: { userID: string; groupID: string }) => {
+      if (kickedGroupID === groupID) {
+        handleGroupUpdate();
+      }
+    });
+
+    // Thành viên rời nhóm
+    socket.on("memberLeft", ({ userID, groupID: leftGroupID }: { userID: string; groupID: string }) => {
+      if (leftGroupID === groupID) {
+        handleGroupUpdate();
+      }
+    });
+
+    // Đổi tên nhóm
+    socket.on("groupRenamed", ({ groupID: renamedGroupID, newGroupName }: { groupID: string; newGroupName: string }) => {
+      if (renamedGroupID === groupID) {
+        setGroupName(newGroupName);
+        handleGroupUpdate();
+      }
+    });
+
+    // Nhóm bị xóa
+    socket.on("groupDeleted", (deletedGroupID: string) => {
+      if (deletedGroupID === groupID) {
+        Alert.alert("Thông báo", "Nhóm đã bị xóa.");
+        router.replace("/home");
+      }
+    });
+
+    return () => {
+      socket.off("newMember");
+      socket.off("memberKicked");
+      socket.off("memberLeft");
+      socket.off("groupRenamed");
+      socket.off("groupDeleted");
+    };
+  }, [currentUserID, groupID]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      if (currentUserID && groupID) {
+        fetchGroupDetails(currentUserID, groupID);
+      }
+    }, [currentUserID, groupID])
+  );
 
   const handleSendMessage = async () => {
     if (loading) {
