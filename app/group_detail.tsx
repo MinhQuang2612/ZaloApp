@@ -16,7 +16,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fetchGroupMembers, fetchUserGroups, GroupMember } from "../services/group";
-import { addGroupMember, deleteGroup, kickMember, leaveGroup, leaderLeaveGroup } from "../services/socket";
+import { addGroupMember, deleteGroup, kickMember, leaveGroup, leaderLeaveGroup, renameGroup } from "../services/socket";
 import socket from "../services/socket";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import api from "../services/api";
@@ -76,6 +76,9 @@ export default function GroupDetail() {
   const [searchContact, setSearchContact] = useState<string>("");
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
   const [transferMode, setTransferMode] = useState<'leave' | 'manual'>('leave');
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [renaming, setRenaming] = useState(false);
 
   const fetchUserAvatarAndName = async (userID: string): Promise<{ avatar: string; username: string }> => {
     try {
@@ -416,6 +419,16 @@ export default function GroupDetail() {
           fetchGroupDetails(currentUserID!, groupID as string);
         }
       });
+
+      // Lắng nghe sự kiện forceLeaveGroup để xử lý khi bị kick khỏi nhóm
+      socket.on("forceLeaveGroup", (userID: string, forceGroupID: string) => {
+        console.log("Nhận forceLeaveGroup:", userID, forceGroupID, "currentUserID:", currentUserID);
+        if (userID === currentUserID && forceGroupID === groupID) {
+          socket.emit("leaveGroupRoom", groupID);
+          Alert.alert("Thông báo", "Bạn đã bị kick khỏi nhóm.");
+          router.replace("/home");
+        }
+      });
     };
 
     initialize();
@@ -425,6 +438,7 @@ export default function GroupDetail() {
       socket.off("groupDeleted");
       socket.off("memberKicked");
       socket.off("memberLeft");
+      socket.off("forceLeaveGroup"); // cleanup forceLeaveGroup
     };
   }, [groupID]);
 
@@ -491,7 +505,19 @@ export default function GroupDetail() {
               <ActivityIndicator size="small" color="#fff" />
             ) : (
               <>
-                <Text style={styles.groupName}>{groupName}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={styles.groupName}>{groupName}</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setShowRenameModal(true);
+                      setNewGroupName(groupName);
+                    }}
+                    style={{ marginLeft: 6 }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="create-outline" size={18} color="#fff" />
+                  </TouchableOpacity>
+                </View>
                 <View style={styles.groupDetails}>
                   <Ionicons name="people-outline" size={16} color="#fff" style={styles.groupDetailIcon} />
                   <Text style={styles.groupDetailText}>{membersCount} thành viên</Text>
@@ -721,6 +747,60 @@ export default function GroupDetail() {
               </TouchableOpacity>
               <TouchableOpacity style={styles.modalButton} onPress={handleTransferLeaderAndLeave}>
                 <Text style={styles.modalButtonText}>Xác nhận</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal đổi tên nhóm */}
+      <Modal
+        visible={showRenameModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowRenameModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.addMemberModal}>
+            <Text style={styles.modalTitle}>Đổi tên nhóm</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Nhập tên nhóm mới"
+              value={newGroupName}
+              onChangeText={setNewGroupName}
+              editable={!renaming}
+            />
+            <View style={styles.modalButtonContainer}>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => setShowRenameModal(false)}
+                disabled={renaming}
+              >
+                <Text style={styles.modalButtonText}>Hủy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, { opacity: !newGroupName.trim() || renaming ? 0.5 : 1 }]}
+                disabled={!newGroupName.trim() || renaming}
+                onPress={async () => {
+                  if (!newGroupName.trim()) return;
+                  setRenaming(true);
+                  try {
+                    await renameGroup(groupID as string, newGroupName.trim());
+                    setGroupName(newGroupName.trim());
+                    setShowRenameModal(false);
+                    Alert.alert("Thành công", "Đã đổi tên nhóm thành công");
+                  } catch (error: any) {
+                    Alert.alert("Lỗi", error.message || "Không thể đổi tên nhóm");
+                  } finally {
+                    setRenaming(false);
+                  }
+                }}
+              >
+                {renaming ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.modalButtonText}>Đổi tên</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>

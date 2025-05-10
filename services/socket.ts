@@ -108,7 +108,7 @@ export const deleteGroup = (userID: string, groupID: string): Promise<string> =>
       }
       socket.emit("deleteGroup", userID, groupID, (response: string) => {
           console.log("Delete group response:", response);
-          if (response === "Xóa nhóm thành công") {
+          if (response && response.toLowerCase().includes("thành công")) {
               resolve(response);
           } else {
               reject(new Error(response));
@@ -121,7 +121,7 @@ export const deleteGroup = (userID: string, groupID: string): Promise<string> =>
 export const kickMember = (leaderID: string, userID: string, groupID: string): Promise<string> => {
   return new Promise((resolve, reject) => {
     socket.emit("kickMember", leaderID, userID, groupID, (response: string) => {
-      if (response.includes("Thành công")) {
+      if (response && response.toLowerCase().includes("thành công")) {
         resolve(response);
       } else {
         reject(new Error(response));
@@ -245,6 +245,18 @@ export const registerSocketListeners = (listeners: { event: string; handler: (..
 
 export const removeSocketListeners = (events: string[]) => {
   events.forEach((event) => socket.off(event));
+};
+
+export const renameGroup = (groupID: string, newGroupName: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    socket.emit("renameGroup", groupID, newGroupName, (response: string) => {
+      if (response && response.toLowerCase().includes("thành công")) {
+        resolve(response);
+      } else {
+        reject(new Error(response));
+      }
+    });
+  });
 };
 
 export default socket;
