@@ -390,6 +390,8 @@ export default function Chat() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [isAtBottom, setIsAtBottom] = useState(true);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchText, setSearchText] = useState("");
 
   // Load pinned message from AsyncStorage
   const loadPinnedMessage = async (chatID: string) => {
@@ -1373,8 +1375,8 @@ export default function Chat() {
             <TouchableOpacity style={styles.actionButton}>
               <Ionicons name="call-outline" size={24} color="#fff" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton}>
-              <Ionicons name="videocam-outline" size={24} color="#fff" />
+            <TouchableOpacity style={styles.actionButton} onPress={() => setShowSearch((v) => !v)}>
+              <Ionicons name="search-outline" size={24} color="#fff" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionButton}>
               <Ionicons name="menu" size={24} color="#fff" />
@@ -1383,11 +1385,31 @@ export default function Chat() {
         </View>
       </View>
 
+      {showSearch && (
+        <View style={{ backgroundColor: '#F5F5F5', padding: 8, flexDirection: 'row', alignItems: 'center' }}>
+          <Ionicons name="search-outline" size={20} color="#666" />
+          <TextInput
+            style={{ flex: 1, marginLeft: 8, fontSize: 16, color: '#222' }}
+            placeholder="Tìm kiếm tin nhắn..."
+            value={searchText}
+            onChangeText={setSearchText}
+            autoFocus
+            placeholderTextColor="#aaa"
+          />
+          {searchText ? (
+            <TouchableOpacity onPress={() => setSearchText("")}
+              style={{ marginLeft: 4, justifyContent: 'center', alignItems: 'center' }}>
+              <Ionicons name="close-circle" size={20} color="#666" />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      )}
+
       {renderPinnedMessage()}
       <View style={styles.chatContainer}>
         <FlatList
           ref={flatListRef}
-          data={messages}
+          data={searchText ? messages.filter(m => (typeof m.context === 'string' && m.context.toLowerCase().includes(searchText.toLowerCase()))) : messages}
           keyExtractor={(item, index) => item.messageID || item.createdAt || `message-${index}`}
           renderItem={renderItem}
           contentContainerStyle={{
@@ -1637,7 +1659,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 15,
     borderTopWidth: 1,
-    borderTopColor: "#ddd",
+    borderTopColor: "#F5F5F5",
+    marginBottom: Platform.OS === "android" ? 8 : 0,
   },
   input: { flex: 1, fontSize: 16, marginHorizontal: 10 },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },

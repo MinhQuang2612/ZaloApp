@@ -1745,6 +1745,10 @@ export default function GroupChat() {
     );
   };
 
+  // Thêm state cho tìm kiếm
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchText, setSearchText] = useState("");
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -1858,13 +1862,9 @@ export default function GroupChat() {
             style={styles.icon}
           />
         </TouchableOpacity>
-        <TouchableOpacity>
-          <Ionicons
-            name="videocam-outline"
-            size={24}
-            color="#fff"
-            style={styles.icon}
-          />
+        {/* Thay nút videocam bằng search */}
+        <TouchableOpacity onPress={() => setShowSearch((v) => !v)}>
+          <Ionicons name="search-outline" size={24} color="#fff" style={styles.icon} />
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() =>
@@ -1877,12 +1877,29 @@ export default function GroupChat() {
 
       {renderPinnedMessage()}
       <View style={styles.chatContainer}>
+        {showSearch && (
+          <View style={{ backgroundColor: '#fff', padding: 8, flexDirection: 'row', alignItems: 'center' }}>
+            <Ionicons name="search-outline" size={20} color="#666" />
+            <TextInput
+              style={{ flex: 1, marginLeft: 8, fontSize: 16, color: '#222' }}
+              placeholder="Tìm kiếm tin nhắn..."
+              value={searchText}
+              onChangeText={setSearchText}
+              autoFocus
+              placeholderTextColor="#aaa"
+            />
+            {searchText ? (
+              <TouchableOpacity onPress={() => setSearchText("")}
+                style={{ marginLeft: 4, justifyContent: 'center', alignItems: 'center' }}>
+                <Ionicons name="close-circle" size={20} color="#666" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        )}
         <FlatList
           ref={flatListRef}
-          data={messages}
-          keyExtractor={(item, index) =>
-            item.messageID ?? `${item.createdAt}-${index}`
-          }
+          data={searchText ? messages.filter(m => (typeof m.context === 'string' && m.context.toLowerCase().includes(searchText.toLowerCase()))) : messages}
+          keyExtractor={(item, index) => item.messageID ?? `${item.createdAt}-${index}`}
           renderItem={renderItem}
           contentContainerStyle={{
             padding: 10,

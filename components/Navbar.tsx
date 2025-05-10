@@ -11,9 +11,11 @@ interface NavbarProps {
   showQR?: boolean;
   showAdd?: boolean;
   addIconType?: "add" | "person-add-outline";
+  searchValue?: string;
+  onChangeSearch?: (value: string) => void;
 }
 
-const Navbar: React.FC<NavbarProps> = ({ title, showSearch, showQR, showAdd, addIconType = "add" }) => {
+const Navbar: React.FC<NavbarProps> = ({ title, showSearch, showQR, showAdd, addIconType = "add", searchValue, onChangeSearch }) => {
   const router = useRouter();
   const [showDropdown, setShowDropdown] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 50, right: 15 });
@@ -47,7 +49,13 @@ const Navbar: React.FC<NavbarProps> = ({ title, showSearch, showQR, showAdd, add
       {showSearch ? (
         <View style={styles.searchContainer}>
           <Ionicons name="search" size={25} color="#fff" />
-          <TextInput style={styles.searchInput} placeholder="Tìm kiếm" placeholderTextColor="#ccc" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Tìm kiếm"
+            placeholderTextColor="#ccc"
+            value={typeof searchValue === "string" ? searchValue : undefined}
+            onChangeText={onChangeSearch}
+          />
         </View>
       ) : (
         <Text style={styles.title}>{title}</Text>

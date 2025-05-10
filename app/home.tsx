@@ -59,6 +59,7 @@ export default function Home() {
   const isMounted = useRef(true);
   const isSocketConnected = useRef(false);
   const prevMessagesRef = useRef<CombinedMessage[]>([]); // Lưu trữ messages trước đó để so sánh
+  const [searchQuery, setSearchQuery] = useState("");
 
   const saveMessageStatus = async (messageID: string, status: "deleted" | "recalled") => {
     try {
@@ -852,6 +853,22 @@ export default function Home() {
     [contacts, groups, groupMembersCount, getUserName, getUserAvatar]
   );
 
+  const filterMessages = useCallback(() => {
+    if (!searchQuery.trim()) return messages;
+    const lowerQuery = searchQuery.toLowerCase();
+    return messages.filter((item) => {
+      if (item.type === "single") {
+        const msg = item.data as HomeMessage;
+        const name = getUserName(msg.senderID).toLowerCase();
+        return name.includes(lowerQuery);
+      } else {
+        const groupMsg = item.data as HomeGroupMessage;
+        const groupName = groupMsg.groupName.toLowerCase();
+        return groupName.includes(lowerQuery);
+      }
+    });
+  }, [messages, searchQuery, getUserName]);
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -862,10 +879,13 @@ export default function Home() {
 
   return (
     <View style={styles.container}>
-      <Navbar showSearch showAdd addIconType="add" />
+      <Navbar showSearch showAdd addIconType="add"
+        searchValue={searchQuery}
+        onChangeSearch={setSearchQuery}
+      />
       <FlatList
         style={{ zIndex: 500 }}
-        data={messages}
+        data={filterMessages()}
         keyExtractor={(item, index) =>
           item.type === "single"
             ? `single-${(item.data as HomeMessage).senderID}-${item.data.messageID || index}`
