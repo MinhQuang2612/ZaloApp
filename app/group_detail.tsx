@@ -215,46 +215,19 @@ export default function GroupDetail() {
   };
 
   const handleLeaveGroup = async () => {
-    if (!groupID || !currentUserID) {
-      Alert.alert("Lỗi", "Không tìm thấy thông tin nhóm hoặc người dùng.");
+    if (!groupID || !currentUserID || typeof groupID !== "string" || typeof currentUserID !== "string") {
+      console.log("Dữ liệu không hợp lệ:", { groupID, currentUserID });
+      Alert.alert("Lỗi", "Dữ liệu không hợp lệ.");
       return;
     }
-
-    // Nếu không còn là leader thì rời nhóm bình thường
-    if (!isLeader) {
-      Alert.alert(
-        "Xác nhận",
-        "Bạn có chắc chắn muốn rời nhóm này không?",
-        [
-          { text: "Hủy", style: "cancel" },
-          {
-            text: "Rời nhóm",
-            style: "destructive",
-            onPress: async () => {
-              try {
-                const response = await leaveGroup(currentUserID, groupID as string);
-                Alert.alert("Thành công", response);
-                socket.emit("leaveGroupRoom", groupID);
-                router.replace("/home");
-              } catch (error: any) {
-                console.error("Lỗi khi rời nhóm:", error.message);
-                Alert.alert("Lỗi", `Không thể rời nhóm: ${error.message}`);
-              }
-            },
-          },
-        ]
-      );
-      return;
-    }
-
-    // Nếu là leader và nhóm còn nhiều hơn 1 thành viên
+  
     if (isLeader && members.length > 1) {
+      console.log("Leader rời nhóm, mở modal chuyển quyền");
       setTransferMode('leave');
       setShowTransferLeaderModal(true);
       return;
     }
-
-    // Nếu là leader và chỉ còn 1 thành viên
+  
     Alert.alert(
       "Xác nhận",
       "Bạn có chắc chắn muốn rời nhóm này không?",
@@ -265,12 +238,14 @@ export default function GroupDetail() {
           style: "destructive",
           onPress: async () => {
             try {
-              const response = await leaveGroup(currentUserID, groupID as string);
-              Alert.alert("Thành công", response);
+              console.log(`Gửi leaveGroup: userID=${currentUserID}, groupID=${groupID}`);
+              const response = await leaveGroup(currentUserID, groupID);
+              console.log(`Phản hồi từ leaveGroup: ${response}`);
+              Alert.alert("Thành công", "Đã rời nhóm thành công.");
               socket.emit("leaveGroupRoom", groupID);
               router.replace("/home");
             } catch (error: any) {
-              console.error("Lỗi khi rời nhóm:", error.message);
+              console.error("Lỗi trong handleLeaveGroup:", error.message);
               Alert.alert("Lỗi", `Không thể rời nhóm: ${error.message}`);
             }
           },

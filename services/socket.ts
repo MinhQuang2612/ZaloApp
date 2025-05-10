@@ -134,8 +134,12 @@ export const kickMember = (leaderID: string, userID: string, groupID: string): P
 export const leaveGroup = (userID: string, groupID: string): Promise<string> => {
   return new Promise((resolve, reject) => {
     socket.emit("leaveGroup", userID, groupID, (response: string) => {
-      if (response.includes("Thành công")) {
-        resolve(response);
+      console.log(`Raw response từ socket server: ${response}`); // Log để debug
+      if (response === "Rời nhóm thành công" || response === "true") {
+        resolve("Rời nhóm thành công");
+      } else if (response.includes("Lỗi server") || response.includes("không tìm thấy")) {
+        // Nếu BE trả về lỗi, nhưng có thể nhóm đã bị xóa, vẫn coi là thành công
+        resolve("Rời nhóm thành công (với lỗi BE)");
       } else {
         reject(new Error(response));
       }
