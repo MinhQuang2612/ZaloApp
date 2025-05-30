@@ -13,6 +13,8 @@
       "bundleIdentifier": "com.truonghuutri.zaloapp",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Ứng dụng cần truy cập thư viện ảnh để bạn có thể gửi ảnh trong khung chat.",
+        "NSCameraUsageDescription": "Ứng dụng cần truy cập camera để quét mã QR và chụp ảnh.",
+        "NSMicrophoneUsageDescription": "Ứng dụng cần truy cập microphone để ghi âm và gọi điện.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -26,7 +28,10 @@
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",
         "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO"
       ]
     },
     "web": {
@@ -45,7 +50,15 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-av"
+      "expo-av",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Cho phép $(PRODUCT_NAME) truy cập camera để quét mã QR và chụp ảnh.",
+          "microphonePermission": "Cho phép $(PRODUCT_NAME) truy cập microphone để ghi âm.",
+          "recordAudioAndroid": true
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

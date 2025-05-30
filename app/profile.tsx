@@ -112,7 +112,7 @@ export default function Profile() {
         <Text style={[styles.value, { color: "green" }]}>Đã định danh</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.item}>
+      <TouchableOpacity style={styles.item} onPress={() => router.push("/my_qr_code")}>
         <Ionicons name="qr-code" size={22} color="#007AFF" />
         <Text style={styles.itemText}>Mã QR của tôi</Text>
       </TouchableOpacity>
@@ -135,6 +135,11 @@ export default function Profile() {
         <Ionicons name="key" size={22} color="#007AFF" />
         <Text style={styles.itemText}>Đổi mật khẩu</Text>
         <Ionicons name="chevron-forward" size={22} color="#999" />
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.item} onPress={() => router.push("/qr_login")}>
+        <Ionicons name="qr-code-outline" size={22} color="#007AFF" />
+        <Text style={styles.itemText}>Quét QR kết bạn hoặc đăng nhập web</Text>
       </TouchableOpacity>
 
       <Text style={styles.sectionTitle}>Khác</Text>

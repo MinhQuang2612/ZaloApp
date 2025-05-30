@@ -259,4 +259,9 @@ export const renameGroup = (groupID: string, newGroupName: string): Promise<stri
   });
 };
 
+export function sendQRLogin({ sessionID, accessToken, refreshToken, user }: { sessionID: string, accessToken: string, refreshToken: string, user: any }) {
+  if (!sessionID || !accessToken || !refreshToken || !user) return;
+  socket.emit("qr-login", { sessionID, accessToken, refreshToken, user });
+}
+
 export default socket;
