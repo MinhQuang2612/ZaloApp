@@ -57,7 +57,6 @@
     "react-native-screens": "~4.4.0",
     "react-native-swiper": "^1.6.0",
     "react-native-web": "~0.19.13",
-    "react-native-webrtc": "^124.0.5",
     "react-native-webview": "13.12.5",
     "socket.io-client": "^4.8.1"
   },
