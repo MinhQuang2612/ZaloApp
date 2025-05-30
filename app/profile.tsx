@@ -11,7 +11,7 @@ import {
 import { useRouter, useFocusEffect } from "expo-router"; // Thêm useFocusEffect
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useState } from "react";
-import { getCurrentUser, logoutUser } from "../services/auth";
+import { getCurrentUser, logoutUser, getAccessToken } from "../services/auth";
 import Footer from "../components/Footer";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { disconnectSocket } from "../services/socket";
@@ -34,6 +34,11 @@ export default function Profile() {
 
   const fetchUser = async () => {
     try {
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        router.replace("/login");
+        return;
+      }
       const userData = await getCurrentUser();
       console.log("Profile.js: Fetched userData:", userData); // Log để kiểm tra
       if (!userData) {

@@ -19,6 +19,7 @@ import socket, { connectSocket, registerSocketListeners, removeSocketListeners, 
 import { fetchUserGroups, fetchGroupMembers, Group } from "../services/group";
 import { Ionicons } from "@expo/vector-icons";
 import api from "../services/api";
+import { getAccessToken } from "../services/auth";
 
 type HomeMessage = {
   senderID: string;
@@ -702,13 +703,17 @@ export default function Home() {
     const initialize = async () => {
       try {
         setLoading(true);
+        const accessToken = await getAccessToken();
+        if (!accessToken) {
+          router.replace("/login");
+          return;
+        }
         const userData = await AsyncStorage.getItem("user");
         if (!userData) {
           console.error("Không tìm thấy user trong AsyncStorage");
           router.replace("/login");
           return;
         }
-
         const user = JSON.parse(userData);
         const userID = user.userID;
         if (!userID) {
@@ -717,7 +722,6 @@ export default function Home() {
           return;
         }
         setCurrentUserID(userID);
-
         await connectSocket();
         await loadMessages(userID);
       } catch (error) {

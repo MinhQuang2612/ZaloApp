@@ -29,6 +29,7 @@ import { Audio, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import socket, { connectSocket, deleteMessage, recallMessage, registerSocketListeners, removeSocketListeners } from "../services/socket";
 import { fetchUserGroups, Group } from "../services/group";
+import { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, mediaDevices, MediaStream } from 'react-native-webrtc';
 
 type SocketResponse =
   | "đang gửi"
@@ -392,6 +393,14 @@ export default function Chat() {
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [showSearch, setShowSearch] = useState(false);
   const [searchText, setSearchText] = useState("");
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [peerConnection, setPeerConnection] = useState<RTCPeerConnection | null>(null);
+  const [isCalling, setIsCalling] = useState(false);
+  const [isReceivingCall, setIsReceivingCall] = useState(false);
+  const [callFrom, setCallFrom] = useState<string | null>(null);
+  const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+  const pendingOfferRef = useRef<{ from: string; offer: any } | null>(null);
 
   // Load pinned message from AsyncStorage
   const loadPinnedMessage = async (chatID: string) => {
@@ -1348,6 +1357,91 @@ export default function Chat() {
     );
   };
 
+  // Hàm bắt đầu gọi thoại
+  const startCall = async () => {
+    setIsCalling(true);
+    const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
+    setLocalStream(stream);
+    const pc = new RTCPeerConnection(configuration);
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    setPeerConnection(pc);
+    (pc as any).onicecandidate = (event: any) => {
+      if (event.candidate) {
+        socket.emit('call:ice-candidate', { to: userID, candidate: event.candidate });
+      }
+    };
+    (pc as any).onaddstream = (event: any) => {
+      setRemoteStream(event.stream);
+    };
+    const offer = await pc.createOffer({});
+    await pc.setLocalDescription(offer);
+    socket.emit('call:offer', { to: userID, offer });
+  };
+
+  // Nhận offer
+  useEffect(() => {
+    const handleOffer = async ({ from, offer }: { from: string; offer: any }) => {
+      setIsReceivingCall(true);
+      setCallFrom(from);
+      pendingOfferRef.current = { from, offer };
+    };
+    const handleAnswer = async ({ from, answer }: { from: string; answer: any }) => {
+      if (peerConnection) {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+      }
+    };
+    const handleIceCandidate = async ({ from, candidate }: { from: string; candidate: any }) => {
+      if (peerConnection) {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      }
+    };
+    socket.on('call:offer', handleOffer);
+    socket.on('call:answer', handleAnswer);
+    socket.on('call:ice-candidate', handleIceCandidate);
+    return () => {
+      socket.off('call:offer', handleOffer);
+      socket.off('call:answer', handleAnswer);
+      socket.off('call:ice-candidate', handleIceCandidate);
+    };
+  }, [peerConnection]);
+
+  // Hàm nhận cuộc gọi
+  const acceptCall = async () => {
+    setIsReceivingCall(false);
+    setIsCalling(true);
+    const pending = pendingOfferRef.current;
+    if (!pending) return;
+    const { from, offer } = pending;
+    const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
+    setLocalStream(stream);
+    const pc = new RTCPeerConnection(configuration);
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    setPeerConnection(pc);
+    (pc as any).onicecandidate = (event: any) => {
+      if (event.candidate) {
+        socket.emit('call:ice-candidate', { to: from, candidate: event.candidate });
+      }
+    };
+    (pc as any).onaddstream = (event: any) => {
+      setRemoteStream(event.stream);
+    };
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    socket.emit('call:answer', { to: from, answer });
+  };
+
+  // Hàm kết thúc cuộc gọi
+  const endCall = () => {
+    if (peerConnection) peerConnection.close();
+    setPeerConnection(null);
+    setLocalStream(null);
+    setRemoteStream(null);
+    setIsCalling(false);
+    setIsReceivingCall(false);
+    setCallFrom(null);
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -1372,7 +1466,7 @@ export default function Chat() {
           </TouchableOpacity>
 
           <View style={styles.navbarActions}>
-            <TouchableOpacity style={styles.actionButton}>
+            <TouchableOpacity style={styles.actionButton} onPress={startCall}>
               <Ionicons name="call-outline" size={24} color="#fff" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionButton} onPress={() => setShowSearch((v) => !v)}>
@@ -1576,6 +1670,31 @@ export default function Chat() {
           </View>
         </View>
       </Modal>
+
+      {isReceivingCall && (
+        <View style={{ position: 'absolute', top: 100, left: 0, right: 0, alignItems: 'center', zIndex: 100 }}>
+          <View style={{ backgroundColor: '#fff', padding: 20, borderRadius: 10, elevation: 5 }}>
+            <Text>Bạn có cuộc gọi đến!</Text>
+            <TouchableOpacity onPress={acceptCall} style={{ marginTop: 10, backgroundColor: '#007AFF', padding: 10, borderRadius: 8 }}>
+              <Text style={{ color: '#fff' }}>Nhận cuộc gọi</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={endCall} style={{ marginTop: 10, backgroundColor: '#FF3B30', padding: 10, borderRadius: 8 }}>
+              <Text style={{ color: '#fff' }}>Từ chối</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {isCalling && (
+        <View style={{ position: 'absolute', top: 60, left: 0, right: 0, alignItems: 'center', zIndex: 100 }}>
+          <View style={{ backgroundColor: '#fff', padding: 20, borderRadius: 10, elevation: 5 }}>
+            <Text>Đang gọi...</Text>
+            <TouchableOpacity onPress={endCall} style={{ marginTop: 10, backgroundColor: '#FF3B30', padding: 10, borderRadius: 8 }}>
+              <Text style={{ color: '#fff' }}>Kết thúc</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
